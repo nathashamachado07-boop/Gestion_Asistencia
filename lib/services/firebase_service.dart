@@ -1,50 +1,35 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:intl/intl.dart'; // Asegúrate de tener intl en tu pubspec.yaml
+import 'package:flutter/foundation.dart';
+import 'package:intl/intl.dart';
 
 class FirebaseService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  // --- COORDENADAS DE PRUEBA: SECTOR LA SANTIAGO (JUAN CAMACARO Y COPIAPÓ) ---
-  final double latitudPrueba = -0.1843037; 
-  final double longitudPrueba = -78.4909586;
-  final double rangoMaximoMetros = 100; 
+  // --- COORDENADAS DEL INSTITUTO ---
+  static const double latitudInstituto = -0.1843090;
+  static const double longitudInstituto = -78.4909804;
+  static const double rangoMaximoMetros = 40.0;
+
+  // --- FUNCIÓN PARA OBTENER NÚMERO DE MES ---
+  int _obtenerNumeroMes(String mes) {
+    const meses = {
+      "Enero": 1,
+      "Febrero": 2,
+      "Marzo": 3,
+      "Abril": 4,
+      "Mayo": 5,
+      "Junio": 6,
+      "Julio": 7,
+      "Agosto": 8,
+      "Septiembre": 9,
+      "Octubre": 10,
+      "Noviembre": 11,
+      "Diciembre": 12,
+    };
+    return meses[mes] ?? DateTime.now().month;
+  }
 
   // --- FUNCIÓN PARA VALIDAR GPS ---
-  Future<void> _validarUbicacionGPS() async {
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      throw Exception("El GPS está desactivado. Por favor, actívalo en los ajustes de tu celular.");
-    }
-
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        throw Exception("Permiso de ubicación denegado. La app necesita el GPS para validar tu asistencia.");
-      }
-    }
-    
-    if (permission == LocationPermission.deniedForever) {
-      throw Exception("Los permisos de ubicación están bloqueados permanentemente. Actívalos en la configuración.");
-    }
-
-    Position position = await Geolocator.getCurrentPosition(
-      desiredAccuracy: LocationAccuracy.high
-    );
-
-    double distanciaEnMetros = Geolocator.distanceBetween(
-      position.latitude, 
-      position.longitude, 
-      latitudPrueba, 
-      longitudPrueba
-    );
-
-    if (distanciaEnMetros > rangoMaximoMetros) {
-      // Actualizado con el nombre de la nueva ubicación
-      throw Exception("Fuera de rango (${distanciaEnMetros.toStringAsFixed(0)}m). Debes estar en el sector La Santiago para marcar.");
-    }
-  }
 
   // Login: Trae al usuario y su lista de horarios
   Future<Map<String, dynamic>?> validarLogin(String correo, String password) async {
@@ -67,12 +52,11 @@ class FirebaseService {
     required bool esEntrada,
   }) async {
     
-    // --- LLAMADA A LA FUNCIÓN DE GPS ---
-    await _validarUbicacionGPS();
+    // await _validarUbicacionGPS(); // Descomentar cuando se requiera GPS real
 
     DateTime ahora = DateTime.now();
 
-    // --- 1. NUEVA VALIDACIÓN DE DUPLICADOS ---
+    // 1. VALIDACIÓN DE DUPLICADOS
     QuerySnapshot ultimoRegistroQuery = await _db
         .collection('asistencias_realizadas')
         .where('docente', isEqualTo: nombreUsuario)
@@ -96,7 +80,7 @@ class FirebaseService {
       }
     }
 
-    // --- 2. LÓGICA ORIGINAL DE HORARIOS ---
+    // 2. LÓGICA DE HORARIOS
     DocumentSnapshot? horarioSeleccionado;
 
     for (String id in listaHorarios) {
@@ -116,10 +100,9 @@ class FirebaseService {
       throw Exception("No tienes clases programadas en este horario.");
     }
 
-    // Validación de tiempos
     String horaOficialStr = esEntrada ? horarioSeleccionado['entrada'] : horarioSeleccionado['salida'];
     int horaLimite = int.parse(horaOficialStr.split(":")[0]);
-    String horaActualStr = "${ahora.hour}:${ahora.minute.toString().padLeft(2, '0')}";
+    String horaActualStr = DateFormat('HH:mm').format(ahora);
 
     String estado = "A tiempo";
     if (esEntrada && ahora.hour > horaLimite) {
@@ -130,7 +113,7 @@ class FirebaseService {
       estado = "Completada";
     }
 
-    // --- 3. GUARDAR REGISTRO ---
+    // 3. GUARDAR REGISTRO
     await _db.collection('asistencias_realizadas').add({
       'docente': nombreUsuario,
       'tipo': esEntrada ? "ENTRADA" : "SALIDA",
@@ -148,9 +131,6 @@ class FirebaseService {
     };
   }
 
-  // ==========================================
-  // FUNCIÓN: OBTENER HISTORIAL
-  // ==========================================
   Future<List<Map<String, dynamic>>> obtenerHistorialAsistencias(String nombreDocente) async {
     try {
       QuerySnapshot snapshot = await _db
@@ -165,16 +145,10 @@ class FirebaseService {
         return data;
       }).toList();
     } catch (e) {
-      print("Error al obtener el historial: $e");
-      QuerySnapshot snapshot = await _db
-          .collection('asistencias_realizadas')
-          .where('docente', isEqualTo: nombreDocente)
-          .get();
-      return snapshot.docs.map((doc) => doc.data() as Map<String, dynamic>).toList();
+      return [];
     }
   }
 
-  // Busca todos los detalles de un usuario por su correo
   Future<Map<String, dynamic>?> obtenerDatosPerfil(String correo) async {
     try {
       QuerySnapshot snapshot = await _db
@@ -186,66 +160,101 @@ class FirebaseService {
         return snapshot.docs.first.data() as Map<String, dynamic>;
       }
     } catch (e) {
-      print("Error al obtener perfil: $e");
+      debugPrint("Error al obtener perfil: $e");
     }
     return null;
   }
 
-  // Función para obtener estadísticas del docente
-  Future<Map<String, int>> obtenerEstadisticasDocente(String nombreDocente) async {
-    try {
-      QuerySnapshot snapshot = await _db
-          .collection('asistencias_realizadas')
-          .where('docente', isEqualTo: nombreDocente)
-          .get();
+  Future<Map<String, int>> obtenerEstadisticasDocente(
+  String nombre, {
+  String mes = "Todos",
+}) async {
+    final snapshot = await _db
+        .collection('asistencias_realizadas')
+        .where('docente', isEqualTo: nombre)
+        .get();
 
-      int aTiempo = 0;
-      int atrasos = 0;
-      int salidasAnticipadas = 0;
+    final docs = snapshot.docs
+        .map((doc) => doc.data())
+        .whereType<Map<String, dynamic>>()
+        .toList();
 
-      for (var doc in snapshot.docs) {
-        String estado = doc['estado'] ?? "";
-        if (estado == "A tiempo" || estado == "Completada") aTiempo++;
-        else if (estado == "Atraso") atrasos++;
-        else if (estado == "Salida Anticipada") salidasAnticipadas++;
+    final List<Map<String, dynamic>> filtrados = mes == "Todos"
+        ? docs
+        : docs.where((data) {
+            final fechaCampo = data['fecha'];
+            DateTime? fecha;
+
+            if (fechaCampo is Timestamp) {
+              fecha = fechaCampo.toDate();
+            } else if (fechaCampo is DateTime) {
+              fecha = fechaCampo;
+            } else if (fechaCampo is String) {
+              try {
+                fecha = DateTime.parse(fechaCampo);
+              } catch (_) {
+                return false;
+              }
+            }
+
+            if (fecha == null) return false;
+            final int numeroMes = _obtenerNumeroMes(mes);
+            return fecha.month == numeroMes && fecha.year == DateTime.now().year;
+          }).toList();
+
+    int total = filtrados.length;
+    int puntual = 0;
+    int atraso = 0;
+    int salidaAnticipada = 0;
+
+    for (var data in filtrados) {
+      final estado = data['estado']?.toString() ?? '';
+
+      if (estado == "A tiempo" || estado == "Puntual") {
+        puntual++;
+      } else if (estado == "Atraso") {
+        atraso++;
+      } else if (estado == "Salida Anticipada") {
+        salidaAnticipada++;
       }
-
-      return {
-        'Puntual': aTiempo,
-        'Atraso': atrasos,
-        'Salida Anticipada': salidasAnticipadas,
-        'Total': snapshot.docs.length,
-      };
-    } catch (e) {
-      print("Error en estadísticas: $e");
-      return {'Puntual': 0, 'Atraso': 0, 'Salida Anticipada': 0, 'Total': 0};
     }
-  }
 
-  // ==========================================
-  // NUEVAS FUNCIONES PARA ALMUERZO
-  // ==========================================
-
-  // Verifica si el horario del usuario es de tiempo completo
-  Future<Map<String, dynamic>?> obtenerInfoHorario(String idHorario) async {
-    DocumentSnapshot doc = await _db.collection('horarios').doc(idHorario).get();
-    if (doc.exists) {
-      return doc.data() as Map<String, dynamic>;
-    }
-    return null;
+    return {
+      "Total": total,
+      "Puntual": puntual,
+      "Atraso": atraso,
+      "Salida Anticipada": salidaAnticipada,
+    };
   }
+  // ==========================================
+  // LÓGICA DE ALMUERZO (SOLO TIEMPO COMPLETO)
+  // ==========================================
 
   // Registrar salida al almuerzo
   Future<void> registrarInicioAlmuerzo(String correo) async {
+    QuerySnapshot userCheck = await _db.collection('usuarios').where('correo', isEqualTo: correo).get();
+    
+    if (userCheck.docs.isNotEmpty) {
+      // CORRECCIÓN AQUÍ: Cambié 'horarios' por 'horarios_asignados' que es como está en tu Firebase
+      List<dynamic> horarios = userCheck.docs.first['horarios_asignados'] ?? [];
+      bool esTC = horarios.any((h) => h.toString().startsWith("TC"));
+      
+      if (!esTC) {
+        throw Exception("Los docentes de Tiempo Parcial no registran almuerzo.");
+      }
+    }
+
     String fechaHoy = DateFormat('yyyy-MM-dd').format(DateTime.now());
     String horaActual = DateFormat('HH:mm:ss').format(DateTime.now());
 
+    // Al usar .add(), Firebase crea la colección 'registros_almuerzo' automáticamente si no existe
     await _db.collection('registros_almuerzo').add({
       'correo_usuario': correo,
       'fecha': fechaHoy,
       'hora_salida': horaActual,
-      'hora_regreso': "",
+      'hora_regreso': "--:--",
       'estado': "en_almuerzo",
+      'timestamp': FieldValue.serverTimestamp(), // Añadido para mejor ordenamiento
     });
   }
 
@@ -258,6 +267,7 @@ class FirebaseService {
         .where('correo_usuario', isEqualTo: correo)
         .where('fecha', isEqualTo: fechaHoy)
         .where('estado', isEqualTo: "en_almuerzo")
+        .limit(1)
         .get();
 
     if (query.docs.isNotEmpty) {
@@ -266,11 +276,11 @@ class FirebaseService {
         'estado': "finalizado",
       });
     } else {
-      throw Exception("No se encontró un inicio de almuerzo activo para hoy.");
+      throw Exception("No se encontró un inicio de almuerzo activo.");
     }
   }
 
-  // Obtener estado actual del almuerzo para la UI
+  // Obtener estado actual del almuerzo
   Future<String> obtenerEstadoAlmuerzoHoy(String correo) async {
     String fechaHoy = DateFormat('yyyy-MM-dd').format(DateTime.now());
     var query = await _db.collection('registros_almuerzo')
@@ -280,7 +290,6 @@ class FirebaseService {
 
     if (query.docs.isEmpty) return "pendiente";
     
-    // Si hay registros, buscamos si alguno está "en_almuerzo"
     for (var doc in query.docs) {
       if (doc['estado'] == "en_almuerzo") return "en_almuerzo";
     }

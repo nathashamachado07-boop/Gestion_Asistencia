@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:intl/intl.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import '../services/firebase_service.dart';
 import 'historial_screen.dart';
@@ -9,6 +8,8 @@ import 'perfil_screen.dart';
 import 'estadisticas_screen.dart';
 import 'notificaciones_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 
 class RegistroAsistenciaScreen extends StatefulWidget {
   final String nombreDocente;
@@ -28,19 +29,8 @@ class RegistroAsistenciaScreen extends StatefulWidget {
 
 class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
   
-  // --- CONSTANTES DE CONFIGURACIÓN GEOGRÁFICA ---
-  static const double LATITUD_INSTITUTO = -0.2514767;
-  static const double LONGITUD_INSTITUTO = -78.5400732;
-  static const double RADIO_PERMITIDO = 30.0;
-  static const double PRECISION_MAXIMA = 25.0;
-  static const int MINUTOS_BLOQUEO_REINTENTO = 2;
-
-  // ✅ VARIABLES ESPEJO (SOLUCIONAN WARNING)
-  static const double latitudInstituto = LATITUD_INSTITUTO;
-  static const double longitudInstituto = LONGITUD_INSTITUTO;
-  static const double radioPermitido = RADIO_PERMITIDO;
-  static const double precisionMaxima = PRECISION_MAXIMA;
-  static const int minutosBloqueoReintento = MINUTOS_BLOQUEO_REINTENTO;
+  static const double latitudInstituto = -0.1843090;
+  static const double longitudInstituto = -78.4909804;
 
   final FirebaseService _service = FirebaseService();
   int _indiceActual = 0; 
@@ -50,49 +40,124 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
   late String _fechaActual;
   Timer? _timer;
 
-  final String _horaEntradaHoy = "08:00 AM"; 
-  final int _horasRestantes = 3;
-
   String _estadoAlmuerzo = "pendiente"; 
   String _horaAlmuerzoInicio = "--:--";
   String _horaAlmuerzoFin = "--:--";
 
-  final LatLng _ubicacionInstituto = const LatLng(LATITUD_INSTITUTO, LONGITUD_INSTITUTO); 
-  final Completer<GoogleMapController> _controller = Completer();
+  final LatLng _ubicacionInstituto = LatLng(latitudInstituto, longitudInstituto);
+  
+  Position? _posicionActual;
   final Color colorInstitucional = const Color(0xFF467879);
   final Color colorFondoSubtil = const Color(0xFFF4F7F7);
 
+  // Determina si el docente tiene contrato de Tiempo Completo
   bool _esTiempoCompleto() {
     return widget.horariosDocente.any((horario) => horario.toString().startsWith("TC"));
   }
+  // NUEVO: Detectar si es horario nocturno (HORARIO NOCTURNO)
+bool _esNocturno() {
+  return widget.horariosDocente.any((horario) => horario.toString().startsWith("NOCT"));
+}
+
+  // --- VALIDACIÓN DE HORARIO DE ALMUERZO ---
+  Future<bool> _validarHorarioAlmuerzo() async {
+    try {
+      String idHorarioTC = widget.horariosDocente.firstWhere(
+        (h) => h.toString().startsWith("TC"), 
+        orElse: () => ""
+      );
+
+      if (idHorarioTC.isEmpty) return false;
+
+      DocumentSnapshot doc = await FirebaseFirestore.instance
+          .collection('horarios')
+          .doc(idHorarioTC)
+          .get();
+
+      if (!doc.exists) return false;
+
+      String inicioStr = doc['almuerzo_inicio']; 
+      String finStr = doc['almuerzo_fin'];       
+
+      final ahora = DateTime.now();
+      final horaActualMinutos = ahora.hour * 60 + ahora.minute;
+
+      final partesInicio = inicioStr.split(':');
+      final inicioMinutos = int.parse(partesInicio[0]) * 60 + int.parse(partesInicio[1]);
+
+      final partesFin = finStr.split(':');
+      final finMinutos = int.parse(partesFin[0]) * 60 + int.parse(partesFin[1]);
+
+      return (horaActualMinutos >= inicioMinutos && horaActualMinutos <= finMinutos);
+    } catch (e) {
+      debugPrint("Error validando horario: $e");
+      return false;
+    }
+  }
+
+  Future<void> _obtenerUbicacion() async {
+    bool servicioActivo = await Geolocator.isLocationServiceEnabled();
+    if (!servicioActivo) return;
+
+    LocationPermission permiso = await Geolocator.checkPermission();
+    if (permiso == LocationPermission.denied) {
+      permiso = await Geolocator.requestPermission();
+      if (permiso == LocationPermission.denied) return;
+    }
+
+    if (permiso == LocationPermission.deniedForever) return;
+
+    const LocationSettings locationSettings = LocationSettings(
+      accuracy: LocationAccuracy.high,
+    );
+    Position posicion = await Geolocator.getCurrentPosition(
+      locationSettings: locationSettings,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _posicionActual = posicion;
+    });
+  }
 
   Future<bool> _estaEnElInstituto() async {
-    try {
-      Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high
-      );
+    bool servicioActivo = await Geolocator.isLocationServiceEnabled();
+    if (!servicioActivo) {
+      throw Exception("Activa el GPS del dispositivo.");
+    }
 
-      // ✅ USO DE VARIABLE PARA EVITAR WARNING
-      debugPrint("Bloqueo configurado: $MINUTOS_BLOQUEO_REINTENTO minutos");
-
-      if (position.accuracy > PRECISION_MAXIMA) {
-        debugPrint("Precisión de GPS insuficiente: ${position.accuracy}m");
-        return false;
+    LocationPermission permiso = await Geolocator.checkPermission();
+    if (permiso == LocationPermission.denied) {
+      permiso = await Geolocator.requestPermission();
+      if (permiso == LocationPermission.denied) {
+        throw Exception("Permiso de ubicación denegado.");
       }
+    }
 
-      double distancia = Geolocator.distanceBetween(
-        position.latitude,
-        position.longitude,
-        LATITUD_INSTITUTO,
-        LONGITUD_INSTITUTO,
-      );
+    if (permiso == LocationPermission.deniedForever) {
+      throw Exception("Permisos bloqueados. Actívalos desde configuración.");
+    }
 
-      debugPrint("Distancia al centro: $distancia m. Precisión: ${position.accuracy} m.");
+    const LocationSettings locationSettings = LocationSettings(
+      accuracy: LocationAccuracy.high,
+    );
+    Position posicion = await Geolocator.getCurrentPosition(
+      locationSettings: locationSettings,
+    );
 
-      return distancia <= RADIO_PERMITIDO; 
-    } catch (e) {
-      debugPrint("Error obteniendo ubicación: $e");
-      return false;
+    double distancia = Geolocator.distanceBetween(
+      latitudInstituto,
+      longitudInstituto,
+      posicion.latitude,
+      posicion.longitude,
+    );
+
+    debugPrint("Distancia al instituto: $distancia metros");
+
+    if (distancia <= 40) {
+      return true;
+    } else {
+      throw Exception("Debes estar dentro del instituto (40 metros).");
     }
   }
 
@@ -100,13 +165,10 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
   void initState() {
     super.initState();
     _actualizarTiempo();
-    _escucharEstadoAlmuerzo();
+    _obtenerUbicacion();
+    if (_esTiempoCompleto()) _escucharEstadoAlmuerzo();
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted) {
-        setState(() {
-          _actualizarTiempo();
-        });
-      }
+      if (mounted) setState(() => _actualizarTiempo());
     });
   }
 
@@ -147,17 +209,21 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
 
   Future<void> _gestionarAlmuerzo() async {
     try {
-      bool validado = await _estaEnElInstituto();
+      bool esHorarioValido = await _validarHorarioAlmuerzo();
 
-      if (!validado) {
+      if (!esHorarioValido) {
         _mostrarAlerta(
-          "Ubicación no válida o imprecisa", 
-          "Para registrar tu almuerzo, debes estar dentro del rango permitido (30m) y tener buena señal de GPS.", 
+          "Horario no permitido", 
+          "Aún no es su hora de almuerzo.", 
           Colors.orange
         );
         return;
       }
 
+    if (!_esNocturno()) {
+  bool dentro = await _estaEnElInstituto();
+  if (!dentro) return;
+}
       if (_estadoAlmuerzo == "pendiente") {
         await _service.registrarInicioAlmuerzo(widget.correoUsuario);
       } else if (_estadoAlmuerzo == "en_almuerzo") {
@@ -187,16 +253,9 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
 
   Future<void> _ejecutarRegistro(bool esEntrada) async {
     try {
-      bool validado = await _estaEnElInstituto();
-      if (!validado) {
-        _mostrarAlerta(
-          "Ubicación fuera de rango", 
-          "No se detecta que te encuentres en el instituto.", 
-          Colors.orange
-        );
-        return;
-      }
-
+      if (!_esNocturno()) {
+  await _estaEnElInstituto();
+}
       var res = await _service.registrarMarcacion(
         nombreUsuario: widget.nombreDocente,
         listaHorarios: widget.horariosDocente,
@@ -206,16 +265,10 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
       _mostrarAlerta(
         esEntrada ? "Entrada Registrada" : "Salida Registrada",
         "Bloque: ${res['bloque']}\nEstado: ${res['estado']}\nHora: ${res['hora']}",
-        res['estado'] == "A tiempo" || res['estado'] == "Completada"
-            ? Colors.green
-            : Colors.orange
+        res['estado'] == "A tiempo" || res['estado'] == "Completada" ? Colors.green : Colors.orange
       );
     } catch (e) {
-      _mostrarAlerta(
-        "Atención",
-        e.toString().replaceAll("Exception: ", ""),
-        Colors.redAccent
-      );
+      _mostrarAlerta("Atención", e.toString().replaceAll("Exception: ", ""), Colors.redAccent);
     }
   }
 
@@ -235,7 +288,6 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
         onTap: (index) => setState(() => _indiceActual = index),
         selectedItemColor: colorInstitucional,
         unselectedItemColor: Colors.grey,
-        showUnselectedLabels: true,
         type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.assignment_ind_rounded), label: "Asistencia"),
@@ -247,7 +299,6 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
     );
   }
 
-
   Widget _construirCuerpoInicioSelector() {
     return Scaffold(
       backgroundColor: colorFondoSubtil,
@@ -256,15 +307,8 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
         elevation: 0,
         toolbarHeight: 90,
         centerTitle: true,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(bottom: Radius.circular(30)),
-        ),
-        title: Image.asset(
-          'assets/images/logo_intesud1.png',
-          height: 50,
-          fit: BoxFit.contain,
-          errorBuilder: (context, error, stackTrace) => const Icon(Icons.school, size: 40, color: Colors.white),
-        ),
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(bottom: Radius.circular(30))),
+        title: Image.asset('assets/images/logo_intesud1.png', height: 50, errorBuilder: (c, e, s) => const Icon(Icons.school, size: 40, color: Colors.white)),
       ),
       body: Column(
         children: [
@@ -281,22 +325,18 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
               child: Row(
                 children: [
                   _buildBotonSelector(0, "REGISTRO DE ASISTENCIA"),
-                  // LÓGICA DE VISIBILIDAD: Solo si es Tiempo Completo (TC)
-                  if (_esTiempoCompleto())
+                  if (_esTiempoCompleto()) 
                     _buildBotonSelector(1, "REGISTRO DE ALMUERZO"),
                 ],
               ),
             ),
           ),
-          
           const SizedBox(height: 10),
-
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(25.0),
-              // LÓGICA DE CONTENIDO: Si no es TC, siempre muestra Asistencia aunque intenten forzar la pestaña 1
-              child: (_pestanaInternaActiva == 0 || !_esTiempoCompleto()) 
-                  ? _construirContenidoAsistencia() 
+              child: (_pestanaInternaActiva == 0 || !_esTiempoCompleto())
+                  ? _construirContenidoAsistencia()
                   : _construirContenidoAlmuerzoSolo(),
             ),
           ),
@@ -312,21 +352,25 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
         onTap: () => setState(() => _pestanaInternaActiva = index),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 250),
-          curve: Curves.easeInOut,
-          margin: const EdgeInsets.all(5),
+          margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: estaActivo ? colorInstitucional : Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
+            color: estaActivo ? colorInstitucional : Colors.transparent, 
+            borderRadius: BorderRadius.circular(12)
           ),
-          child: Text(
-            texto,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 11, 
-              fontWeight: estaActivo ? FontWeight.bold : FontWeight.normal,
-              color: estaActivo ? Colors.white : Colors.grey[700],
-              letterSpacing: 0.5
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                texto, 
+                textAlign: TextAlign.center, 
+                style: TextStyle(
+                  fontSize: 10, 
+                  fontWeight: estaActivo ? FontWeight.bold : FontWeight.normal, 
+                  color: estaActivo ? Colors.white : Colors.grey[700]
+                ),
+              ),
             ),
           ),
         ),
@@ -334,94 +378,88 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
     );
   }
 
+  Widget _buildMapaMini() {
+  return Container(
+    height: 180,
+    margin: const EdgeInsets.symmetric(vertical: 15),
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: Colors.white, width: 4),
+      boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 8)]
+    ),
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: FlutterMap(
+        options: MapOptions(
+          initialCenter: _posicionActual != null
+              ? LatLng(_posicionActual!.latitude, _posicionActual!.longitude)
+              : _ubicacionInstituto,
+          initialZoom: 16,
+        ),
+        children: [
+          // 🗺️ MAPA BASE (CartoDB Voyager)
+          TileLayer(
+            urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+            subdomains: const ['a', 'b', 'c', 'd'],
+            userAgentPackageName: 'com.example.app',
+          ),
+
+          // 📍 MARCADOR DEL INSTITUTO
+          MarkerLayer(
+            markers: [
+              Marker(
+                point: _ubicacionInstituto,
+                width: 40,
+                height: 40,
+                child: const Icon(Icons.location_on, color: Colors.red, size: 35),
+              ),
+
+              // 📍 TU UBICACIÓN ACTUAL
+              if (_posicionActual != null)
+                Marker(
+                  point: LatLng(
+                    _posicionActual!.latitude,
+                    _posicionActual!.longitude,
+                  ),
+                  width: 40,
+                  height: 40,
+                  child: const Icon(Icons.person_pin_circle, color: Colors.blue, size: 35),
+                ),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
   Widget _construirContenidoAsistencia() {
     return Column(
       children: [
-        Container(
-          padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 20),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: colorInstitucional.withOpacity(0.1)),
-          ),
-          child: Column(
-            children: [
-              Text(
-                _horaActual,
-                style: TextStyle(fontSize: 32, fontWeight: FontWeight.w300, color: colorInstitucional, letterSpacing: 2),
-              ),
-              Text(
-                _fechaActual.toUpperCase(),
-                style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold, letterSpacing: 1),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
+        _buildRelojCard(),
+        const SizedBox(height: 15),
+        // --- TARJETA DE ESTADO DE JORNADA ---
         Container(
           padding: const EdgeInsets.all(15),
           decoration: BoxDecoration(
-            color: colorInstitucional.withOpacity(0.05),
+            color: colorInstitucional.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(15),
-            border: Border.all(color: colorInstitucional.withOpacity(0.2)),
           ),
           child: Row(
             children: [
-              Icon(Icons.wb_sunny_outlined, color: colorInstitucional),
+              Icon(Icons.wb_sunny_outlined, color: colorInstitucional, size: 24),
               const SizedBox(width: 15),
-              Expanded(
+              const Expanded(
                 child: Text(
-                  "Hoy entraste a las $_horaEntradaHoy. Te faltan $_horasRestantes horas para completar tu jornada.",
-                  style: const TextStyle(fontSize: 13, color: Colors.black87),
+                  "Hoy entraste a las 08:00 AM. Te faltan 3 horas para completar tu jornada.",
+                  style: TextStyle(fontSize: 12, color: Colors.black87),
                 ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 20),
-        const Align(
-          alignment: Alignment.centerLeft,
-          child: Text(
-            "Tu ubicación actual",
-            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black87, fontSize: 14)
-          ),
-        ),
+        if (!_esNocturno()) _buildMapaMini(),
         const SizedBox(height: 10),
-        Container(
-          height: 180,
-          width: double.infinity,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white, width: 4),
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10)],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: GoogleMap(
-              mapType: MapType.normal,
-              initialCameraPosition: CameraPosition(target: _ubicacionInstituto, zoom: 16),
-              onMapCreated: (GoogleMapController controller) => _controller.complete(controller),
-              markers: {
-                Marker(
-                  markerId: const MarkerId('instituto'),
-                  position: _ubicacionInstituto,
-                  infoWindow: const InfoWindow(title: 'Instituto Sudamericano'),
-                ),
-              },
-              myLocationEnabled: true,
-              zoomControlsEnabled: false,
-            ),
-          ),
-        ),
-        const SizedBox(height: 25),
-        const Align(
-          alignment: Alignment.centerLeft,
-          child: Text(
-            "¿Qué desea realizar hoy?",
-            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black87, fontSize: 16)
-          ),
-        ),
-        const SizedBox(height: 15),
         _botonAsistencia(
           titulo: "MARCAR ENTRADA",
           subtitulo: "Registrar inicio de labores",
@@ -438,27 +476,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
           onTap: () => _ejecutarRegistro(false),
         ),
         const SizedBox(height: 25),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => HistorialScreen(nombreDocente: widget.nombreDocente),
-                ),
-              );
-            },
-            icon: const Icon(Icons.history, size: 20),
-            label: const Text("CONSULTAR HISTORIAL DE REGISTROS"),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: colorInstitucional,
-              side: BorderSide(color: colorInstitucional.withOpacity(0.5)),
-              padding: const EdgeInsets.symmetric(vertical: 15),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-            ),
-          ),
-        ),
+        _botonHistorial(false),
       ],
     );
   }
@@ -466,102 +484,26 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
   Widget _construirContenidoAlmuerzoSolo() {
     return Column(
       children: [
-        // RELOJ DIGITAL
-        Container(
-          padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 20),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: colorInstitucional.withOpacity(0.1)),
-          ),
-          child: Column(
-            children: [
-              Text(
-                _horaActual,
-                style: TextStyle(fontSize: 32, fontWeight: FontWeight.w300, color: colorInstitucional, letterSpacing: 2),
-              ),
-              Text(
-                _fechaActual.toUpperCase(),
-                style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold, letterSpacing: 1),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
-
-        // CARD DE CONTROL DE ALMUERZO
-        _construirSeccionAlmuerzoCard(),
-        
-        const SizedBox(height: 25),
-
-        // MAPA REUBICADO: Ahora aparece debajo de la tarjeta de botones y arriba del historial
-        const Align(
-          alignment: Alignment.centerLeft,
-          child: Text(
-            "Tu ubicación para almuerzo",
-            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black87, fontSize: 14)
-          ),
-        ),
+        _buildRelojCard(),
+        if (!_esNocturno()) _buildMapaMini(),
         const SizedBox(height: 10),
-        Container(
-          height: 180,
-          width: double.infinity,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white, width: 4),
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10)],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: GoogleMap(
-              mapType: MapType.normal,
-              initialCameraPosition: CameraPosition(target: _ubicacionInstituto, zoom: 16),
-              onMapCreated: (GoogleMapController controller) {
-                if (!_controller.isCompleted) {
-                  _controller.complete(controller);
-                }
-              },
-              markers: {
-                Marker(
-                  markerId: const MarkerId('instituto_almuerzo'),
-                  position: _ubicacionInstituto,
-                  infoWindow: const InfoWindow(title: 'Instituto Sudamericano'),
-                ),
-              },
-              myLocationEnabled: true,
-              zoomControlsEnabled: false,
-            ),
-          ),
-        ),
-        
+        _construirSeccionAlmuerzoCard(),
         const SizedBox(height: 25),
-
-        // BOTÓN DE HISTORIAL DE ALMUERZO
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => HistorialScreen(
-                    nombreDocente: widget.nombreDocente,
-                    esAlmuerzo: true, // ENVIAR PARÁMETRO PARA DIFERENCIAR COLECCIÓN EN FIREBASE
-                  ),
-                ),
-              );
-            },
-            icon: const Icon(Icons.history_toggle_off_rounded, size: 20),
-            label: const Text("CONSULTAR HISTORIAL DE ALMUERZO"),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: colorInstitucional,
-              side: BorderSide(color: colorInstitucional.withOpacity(0.5)),
-              padding: const EdgeInsets.symmetric(vertical: 15),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-            ),
-          ),
-        ),
+        _botonHistorial(true),
       ],
+    );
+  }
+
+  Widget _buildRelojCard() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 20),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: colorInstitucional.withValues(alpha: 0.1))),
+      child: Column(
+        children: [
+          Text(_horaActual, style: TextStyle(fontSize: 32, fontWeight: FontWeight.w300, color: colorInstitucional, letterSpacing: 2)),
+          Text(_fechaActual.toUpperCase(), style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold, letterSpacing: 1)),
+        ],
+      ),
     );
   }
 
@@ -572,74 +514,34 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(25),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(25),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 15, offset: const Offset(0, 8))],
-        border: Border.all(color: colorInstitucional.withOpacity(0.05))
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 15, offset: const Offset(0, 8))], border: Border.all(color: colorInstitucional.withValues(alpha: 0.05))),
       child: Column(
         children: [
-          Container(
-            padding: const EdgeInsets.all(15),
-            decoration: BoxDecoration(color: colorInstitucional.withOpacity(0.1), shape: BoxShape.circle),
-            child: Icon(Icons.restaurant_menu_rounded, color: colorInstitucional, size: 30),
-          ),
+          Icon(Icons.restaurant_menu_rounded, color: colorInstitucional, size: 40),
           const SizedBox(height: 15),
-          const Text(
-            "CONTROL DE JORNADA DE ALMUERZO",
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 16),
-          ),
+          const Text("CONTROL DE JORNADA DE ALMUERZO", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           const SizedBox(height: 8),
-          const Text("Recuerda registrar el inicio y fin de tu tiempo de descanso.", 
+          const Text(
+            "Recuerda registrar el inicio y fin de tu tiempo de descanso.",
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.grey, fontSize: 12)),
+            style: TextStyle(color: Colors.grey, fontSize: 12),
+          ),
           const SizedBox(height: 25),
-          
-          if (_horaAlmuerzoInicio != "--:--")
-            Padding(
-              padding: const EdgeInsets.only(bottom: 15.0),
-              child: Column(
-                children: [
-                  Text("Salida: $_horaAlmuerzoInicio", 
-                    style: const TextStyle(color: Colors.black54, fontSize: 12, fontWeight: FontWeight.w500)),
-                  if (_horaAlmuerzoFin != "--:--")
-                    Text("Regreso: $_horaAlmuerzoFin", 
-                      style: const TextStyle(color: Colors.black54, fontSize: 12, fontWeight: FontWeight.w500)),
-                ],
-              ),
-            ),
-            
+          if (_horaAlmuerzoInicio != "--:--") Text("Salida: $_horaAlmuerzoInicio | Regreso: $_horaAlmuerzoFin", style: const TextStyle(color: Colors.black54, fontSize: 12)),
+          const SizedBox(height: 15),
           if (finalizado)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              decoration: BoxDecoration(color: Colors.green[50], borderRadius: BorderRadius.circular(15)),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.check_circle_rounded, color: Colors.green[600], size: 20),
-                  const SizedBox(width: 10),
-                  Text("¡Almuerzo completado hoy!", style: TextStyle(color: Colors.green[800], fontSize: 13, fontWeight: FontWeight.bold)),
-                ],
-              ),
-            )
+            const Text("¡Almuerzo completado hoy!", style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold))
           else
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _gestionarAlmuerzo,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: enCurso ? Colors.redAccent : Colors.orange,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 18),
-                  elevation: 3,
+                  backgroundColor: enCurso ? Colors.redAccent : Colors.orange, 
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                  padding: const EdgeInsets.symmetric(vertical: 12)
                 ),
-                child: Text(
-                  enCurso ? "FINALIZAR TIEMPO DE ALMUERZO" : "INICIAR HORA DE ALMUERZO",
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, letterSpacing: 1),
-                ),
+                child: Text(enCurso ? "FINALIZAR ALMUERZO" : "INICIAR HORA DE ALMUERZO"),
               ),
             ),
         ],
@@ -647,56 +549,35 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
     );
   }
 
-  Widget _botonAsistencia({
-    required String titulo,
-    required String subtitulo,
-    required IconData icon,
-    required Color color,
-    required VoidCallback onTap
-  }) {
-    double escala = 1.0;
-    return StatefulBuilder(
-      builder: (context, setStateButton) {
-        return GestureDetector(
-          onTapDown: (_) => setStateButton(() => escala = 0.95),
-          onTapUp: (_) => setStateButton(() => escala = 1.0),
-          onTapCancel: () => setStateButton(() => escala = 1.0),
-          onTap: onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 100),
-            transform: Matrix4.identity()..scale(escala),
-            transformAlignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 5))],
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(15)),
-                    child: Icon(icon, color: color, size: 28),
-                  ),
-                  const SizedBox(width: 20),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(titulo, style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: color)),
-                        Text(subtitulo, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                      ],
-                    ),
-                  ),
-                  Icon(Icons.arrow_forward_ios_rounded, color: color.withOpacity(0.3), size: 16),
-                ],
-              ),
-            ),
-          ),
-        );
-      }
+  Widget _botonHistorial(bool esAlmuerzo) {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (c) => HistorialScreen(nombreDocente: widget.nombreDocente, esAlmuerzo: esAlmuerzo))),
+        icon: const Icon(Icons.history),
+        label: Text(esAlmuerzo ? "HISTORIAL ALMUERZO" : "HISTORIAL REGISTROS"),
+        style: OutlinedButton.styleFrom(foregroundColor: colorInstitucional, side: BorderSide(color: colorInstitucional.withValues(alpha: 0.5)), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
+      ),
+    );
+  }
+
+  Widget _botonAsistencia({required String titulo, required String subtitulo, required IconData icon, required Color color, required VoidCallback onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(15),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 10)]),
+        child: Row(
+          children: [
+            Icon(icon, color: color, size: 30),
+            const SizedBox(width: 20),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(titulo, style: TextStyle(fontWeight: FontWeight.bold, color: color)),
+              Text(subtitulo, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            ]),
+          ],
+        ),
+      ),
     );
   }
 }
