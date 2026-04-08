@@ -300,51 +300,77 @@ bool _esNocturno() {
   }
 
   Widget _construirCuerpoInicioSelector() {
-    return Scaffold(
-      backgroundColor: colorFondoSubtil,
-      appBar: AppBar(
-        backgroundColor: colorInstitucional,
-        elevation: 0,
-        toolbarHeight: 90,
-        centerTitle: true,
-        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(bottom: Radius.circular(30))),
-        title: Image.asset('assets/images/logo_intesud1.png', height: 50, errorBuilder: (c, e, s) => const Icon(Icons.school, size: 40, color: Colors.white)),
-      ),
-      body: Column(
+  return Scaffold(
+    backgroundColor: colorFondoSubtil,
+    appBar: AppBar(
+      backgroundColor: colorInstitucional,
+      elevation: 0,
+      toolbarHeight: 90,
+      centerTitle: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(bottom: Radius.circular(30))),
+      title: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          const SizedBox(height: 20),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 25.0),
-            child: Container(
-              height: 55,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(15),
-                boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 10, offset: const Offset(0, 5))]
-              ),
-              child: Row(
-                children: [
-                  _buildBotonSelector(0, "REGISTRO DE ASISTENCIA"),
-                  if (_esTiempoCompleto()) 
-                    _buildBotonSelector(1, "REGISTRO DE ALMUERZO"),
-                ],
-              ),
-            ),
+          Image.asset(
+            'assets/images/logo_intesud1.png',
+            height: 50,
+            errorBuilder: (c, e, s) =>
+                const Icon(Icons.school, size: 40, color: Colors.white),
           ),
-          const SizedBox(height: 10),
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(25.0),
-              child: (_pestanaInternaActiva == 0 || !_esTiempoCompleto())
-                  ? _construirContenidoAsistencia()
-                  : _construirContenidoAlmuerzoSolo(),
+          const SizedBox(height: 5),
+          const Text(
+            "Yo soy del Intesud",
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+              shadows: [
+                Shadow(
+                  offset: Offset(1, 1),
+                  blurRadius: 3,
+                  color: Colors.black26,
+                ),
+              ],
             ),
           ),
         ],
       ),
-    );
-  }
-
+    ),
+    body: Column(
+      children: [
+        const SizedBox(height: 20),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 25.0),
+          child: Container(
+            height: 55,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(15),
+              boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 10, offset: const Offset(0, 5))]
+            ),
+            child: Row(
+              children: [
+                _buildBotonSelector(0, "REGISTRO DE ASISTENCIA"),
+                if (_esTiempoCompleto()) 
+                  _buildBotonSelector(1, "REGISTRO DE ALMUERZO"),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(25.0),
+            child: (_pestanaInternaActiva == 0 || !_esTiempoCompleto())
+                ? _construirContenidoAsistencia()
+                : _construirContenidoAlmuerzoSolo(),
+          ),
+        ),
+      ],
+    ),
+  );
+}
   Widget _buildBotonSelector(int index, String texto) {
     bool estaActivo = _pestanaInternaActiva == index;
     return Expanded(
