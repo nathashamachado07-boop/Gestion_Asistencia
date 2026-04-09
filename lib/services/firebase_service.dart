@@ -33,18 +33,26 @@ class FirebaseService {
 
   // Login: Trae al usuario y su lista de horarios
   Future<Map<String, dynamic>?> validarLogin(String correo, String password) async {
-    QuerySnapshot userQuery = await _db
-        .collection('usuarios')
-        .where('correo', isEqualTo: correo)
-        .where('password', isEqualTo: password)
-        .get();
+  print("Intentando login con: $correo"); // Ver que llega el correo
+  
+  QuerySnapshot userQuery = await _db
+      .collection('usuarios')
+      .where('correo', isEqualTo: correo.trim())
+      .get();
 
-    if (userQuery.docs.isNotEmpty) {
-      return userQuery.docs.first.data() as Map<String, dynamic>;
+  print("Documentos encontrados: ${userQuery.docs.length}"); // Si sale 0, el correo no coincide
+
+  if (userQuery.docs.isNotEmpty) {
+    var data = userQuery.docs.first.data() as Map<String, dynamic>;
+    print("Password en DB: ${data['password']}");
+    print("Password ingresada: $password");
+    
+    if (data['password'] == password) {
+      return data;
     }
-    return null;
   }
-
+  return null;
+}
   // Marcación: Busca en la lista de la captura con VALIDACIÓN DE ESTADO
   Future<Map<String, String>> registrarMarcacion({
     required String nombreUsuario,

@@ -320,7 +320,7 @@ bool _esNocturno() {
           ),
           const SizedBox(height: 5),
           const Text(
-            "Yo soy del Intesud",
+            "Registro de Asistencia INTESUD",
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w600,
