@@ -3,6 +3,7 @@ import '../services/firebase_service.dart';
 import 'registro_asistencia_screen.dart';
 import 'rrhh/nav_rrhh_screen.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import '../web/admin_layout.dart';
 import 'package:flutter_application_1/web/reportes_admin_web.dart' 
     if (dart.library.io) 'package:flutter_application_1/web/reportes_admin_web_stub.dart';
 
@@ -46,88 +47,67 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   }
 
   void _iniciarSesion() async {
-  setState(() => _cargando = true);
+    setState(() => _cargando = true);
 
-  // 1. Validamos credenciales con el servicio de Firebase
-  var datosUsuario = await _service.validarLogin(
-    _correoController.text.trim(),
-    _passController.text.trim(),
-  );
+    var datosUsuario = await _service.validarLogin(
+      _correoController.text.trim(),
+      _passController.text.trim(),
+    );
 
-  setState(() => _cargando = false);
+    setState(() => _cargando = false);
 
-  if (datosUsuario != null) {
-    if (!mounted) return;
+    if (datosUsuario != null) {
+      if (!mounted) return;
 
-    // 2. Extraemos el rol real desde la base de datos
-    String rolDB = datosUsuario['rol']?.toString() ?? 'Docente';
-    String rolLimpio = rolDB.trim().toUpperCase();
+      String rolDB = datosUsuario['rol']?.toString() ?? 'Docente';
+      String rolLimpio = rolDB.trim().toUpperCase();
 
-    // --- LÓGICA DE REDIRECCIÓN CORREGIDA ---
-    // Ahora incluimos 'ADMINISTRATIVO' para que no los mande a la pantalla de docente
-    if (rolLimpio == 'RRHH' || rolLimpio == 'ADMINISTRATIVO') {
-      if (kIsWeb) {
-        // Redirección para entorno Web (Panel de Control)
+      // 1. SOLO RRHH va a la pantalla de reportes/web
+      if (rolLimpio == 'RRHH') {
+        if (kIsWeb) {
+          Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => const AdminLayout()), 
+    );
+        } else {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => NavRRHHScreen()),
+          );
+        }
+      } 
+      // 2. ADMINISTRATIVOS Y DOCENTES van a la pantalla de asistencia
+      else {
+        String nombre = datosUsuario['nombre'] ?? 'Usuario';
+        String correo = _correoController.text.trim();
+        
+        // Convertimos el array de horarios de Firebase a una Lista de Strings
+        List<String> listaHorarios = [];
+        if (datosUsuario['horarios_asignados'] != null && datosUsuario['horarios_asignados'] is List) {
+          listaHorarios = List<String>.from(datosUsuario['horarios_asignados']);
+        } else {
+          listaHorarios = ['Sin horario asignado'];
+        }
+
+        // REDIRECCIÓN CORRECTA: Pasando los 3 parámetros requeridos
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (context) => const ReportesAdminWeb()),
-        );
-      } else {
-        // Redirección para entorno móvil
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => NavRRHHScreen()),
+          MaterialPageRoute(
+            builder: (context) => RegistroAsistenciaScreen(
+              nombreDocente: nombre,      // Parámetro 1
+              horariosDocente: listaHorarios, // Parámetro 2 (como Lista)
+              correoUsuario: correo,      // Parámetro 3
+            ),
+          ),
         );
       }
     } else {
-      // PARA TODOS LOS DEMÁS (Docentes, Diurno, Nocturno, etc.)
-      String nombre = datosUsuario['nombre'] ?? 'Usuario';
-      String correo = _correoController.text.trim();
-      
-      // CORRECCIÓN DE HORARIOS: 
-      // Firebase devuelve una List<dynamic> en el campo 'horarios_asignados'
-      List<String> listaHorarios = [];
-      
-      if (datosUsuario['horarios_asignados'] != null && datosUsuario['horarios_asignados'] is List) {
-        listaHorarios = List<String>.from(datosUsuario['horarios_asignados']);
-      } else if (datosUsuario['horario'] != null) {
-        // Respaldo por si algún usuario aún usa el campo viejo 'horario' como String
-        listaHorarios = [datosUsuario['horario'].toString()];
-      } else {
-        listaHorarios = ['Sin horario asignado'];
-      }
-
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => RegistroAsistenciaScreen(
-            nombreDocente: nombre,
-            horariosDocente: listaHorarios, // Ahora pasamos la lista real
-            correoUsuario: correo,
-          ),
-        ),
+      // Error de login
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Correo o contraseña incorrectos")),
       );
     }
-  } else {
-    // Mensaje de error si las credenciales fallan
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Row(
-          children: [
-            Icon(Icons.error_outline, color: Colors.white, size: 18),
-            SizedBox(width: 8),
-            Text("Correo o contraseña incorrectos", 
-              style: TextStyle(color: Colors.white)),
-          ],
-        ),
-        backgroundColor: Colors.redAccent,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        margin: const EdgeInsets.all(16),
-      ),
-    );
   }
-}
 
   @override
   Widget build(BuildContext context) {

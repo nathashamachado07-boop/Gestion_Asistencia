@@ -2,20 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'screens/login_screen.dart'; 
-
-
+import 'package:intl/date_symbol_data_local.dart';
 
 void main() async {
-  // Aseguramos que Flutter cargue los componentes antes de iniciar Firebase
- WidgetsFlutterBinding.ensureInitialized();  
-  // Inicialización de la base de datos de Google
-    await Firebase.initializeApp(
-   options: DefaultFirebaseOptions.currentPlatform,
+  WidgetsFlutterBinding.ensureInitialized();  
+  
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  await initializeDateFormatting('es_ES', null); // <--- 2. AÑADE SOLO ESTO
   
   runApp(const MyApp());
 }
-
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
