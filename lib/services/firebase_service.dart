@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
+import '../models/solicitud_model.dart';
 
 class FirebaseService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -288,7 +289,49 @@ class FirebaseService {
     }
   }
 
-  // Obtener estado actual del almuerzo
+  // ==========================================
+  // LÓGICA DE SOLICITUDES (VACACIONES Y PERMISOS)
+  // ==========================================
+
+  // 1. Enviar una nueva solicitud (Desde el Celular)
+  // ==========================================
+  // LÓGICA DE SOLICITUDES (VACACIONES Y PERMISOS)
+  // ==========================================
+
+  // ESTA ES LA ÚNICA VERSIÓN QUE DEBE QUEDAR
+  Future<void> enviarSolicitud(Solicitud solicitud) async {
+  try {
+    await _db.collection('solicitudes').add({
+      ...solicitud.toMap(),
+      'fecha_solicitud': FieldValue.serverTimestamp(), // Excelente, esto es lo mejor para el orden
+    });
+  } catch (e) {
+    throw Exception("Error al enviar la solicitud: $e");
+  }
+}
+
+  // 2. Escuchar solicitudes pendientes en tiempo real (Para la Web RRHH)
+  Stream<QuerySnapshot> obtenerSolicitudesPendientes() {
+    return _db
+        .collection('solicitudes')
+        .where('estado', isEqualTo: 'pendiente')
+        .orderBy('fecha_solicitud', descending: false)
+        .snapshots();
+  }
+
+  // 3. Actualizar estado (Aceptar o Rechazar desde la Web)
+  Future<void> actualizarEstadoSolicitud(String idDoc, String nuevoEstado) async {
+    try {
+      await _db.collection('solicitudes').doc(idDoc).update({
+        'estado': nuevoEstado,
+        'fecha_resolucion': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      throw Exception("Error al actualizar la solicitud: $e");
+    }
+  }
+
+// Obtener estado actual del almuerzo
   Future<String> obtenerEstadoAlmuerzoHoy(String correo) async {
     String fechaHoy = DateFormat('yyyy-MM-dd').format(DateTime.now());
     var query = await _db.collection('registros_almuerzo')

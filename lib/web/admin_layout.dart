@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'reportes_admin_web.dart';
 import 'dashboard_admin_web.dart';
-import 'estadisticas_admin_web.dart'; // <--- 1. IMPORTA TU NUEVO ARCHIVO
+import 'estadisticas_admin_web.dart';
+import 'gestion_personal_web.dart';
 
 class AdminLayout extends StatefulWidget {
   const AdminLayout({super.key});
@@ -15,12 +16,12 @@ class _AdminLayoutState extends State<AdminLayout> {
   static const Color primaryColor = Color(0xFF467879); 
   static const Color sidebarColor = Color(0xFF2C3E50); 
 
-  // 2. ACTUALIZA LA LISTA DE DASHBOARDS
+  // Mantenemos tu lista de dashboards igual para que los índices funcionen
   final List<Widget> _dashboards = [
-    const DashboardAdminWeb(),    // Índice 0: Panel General
-    const EstadisticasAdminWeb(), // Índice 1: Análisis Estadístico (NUEVO)
-    const ReportesAdminWeb(),     // Índice 2: Tabla de Reportes
-    const Center(child: Text("👥 GESTIÓN DE PERSONAL DOCENTE", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold))),
+    const DashboardAdminWeb(),    // Índice 0
+    const EstadisticasAdminWeb(), // Índice 1
+    const ReportesAdminWeb(),     // Índice 2
+    const GestionPersonalWeb(), // Índice 3
   ];
 
   @override
@@ -34,6 +35,7 @@ class _AdminLayoutState extends State<AdminLayout> {
             color: sidebarColor,
             child: Column(
               children: [
+                // HEADER DEL LOGO
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(vertical: 30, horizontal: 10),
@@ -70,11 +72,29 @@ class _AdminLayoutState extends State<AdminLayout> {
                 
                 const SizedBox(height: 20),
                 
-                // OPCIONES DEL MENÚ (Asegúrate que el índice coincida con la lista _dashboards)
-                _menuItem(0, Icons.dashboard_customize_outlined, "Dashboard"),
-                _menuItem(1, Icons.analytics_outlined, "Estadísticas"),
-                _menuItem(2, Icons.file_copy_outlined, "Reportes de Asistencia"),
-                _menuItem(3, Icons.group_outlined, "Gestión Personal"),
+                // --- OPCIONES DEL MENÚ ---
+                
+                _menuItem(0, Icons.dashboard_customize_outlined, "Menu General"),
+
+                // 2. MENÚ AGRUPADO (ExpansionTile)
+                Theme(
+                  data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                  child: ExpansionTile(
+                    initiallyExpanded: _selectedIndex != 0, // Se abre si no estamos en Dashboard
+                    leading: const Icon(Icons.apps_outlined, color: Colors.white60, size: 22),
+                    title: const Text(
+                      "Aplicación de Asistencia",
+                      style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
+                    ),
+                    iconColor: Colors.white,
+                    collapsedIconColor: Colors.white60,
+                    children: [
+                      _subMenuItem(1, Icons.analytics_outlined, "Estadísticas"),
+                      _subMenuItem(2, Icons.file_copy_outlined, "Reportes de Asistencia"),
+                      _subMenuItem(3, Icons.group_outlined, "Gestión Personal"),
+                    ],
+                  ),
+                ),
                 
                 const Spacer(),
                 
@@ -122,15 +142,33 @@ class _AdminLayoutState extends State<AdminLayout> {
                               child: Icon(Icons.person, size: 18, color: Colors.white),
                             ),
                             SizedBox(width: 8),
-                            Text("Administrador RRHH", style: TextStyle(color: primaryColor, fontWeight: FontWeight.bold)),
+                            Text("Recursos Humanos", style: TextStyle(color: primaryColor, fontWeight: FontWeight.bold)),
                           ],
                         ),
                       ),
-                      const SizedBox(width: 15),
-                      IconButton(
-                        onPressed: () => Navigator.pushReplacementNamed(context, '/login'), 
-                        icon: const Icon(Icons.power_settings_new, color: Colors.redAccent)
-                      ),
+                      // Busca esta parte dentro de tu Row del NAVBAR SUPERIOR
+const SizedBox(width: 15),
+
+// Botón de Cerrar Sesión mejorado
+TextButton.icon(
+  onPressed: () {
+    // Aquí puedes agregar lógica adicional como:
+    // FirebaseAuth.instance.signOut(); // Si usas Firebase
+    
+    // Navegación al Login
+    Navigator.pushReplacementNamed(context, '/login'); 
+  },
+  icon: const Icon(Icons.logout, color: Colors.redAccent, size: 20),
+  label: const Text(
+    "Cerrar Sesión", 
+    style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)
+  ),
+  style: TextButton.styleFrom(
+    padding: const EdgeInsets.symmetric(horizontal: 12),
+    backgroundColor: Colors.redAccent.withOpacity(0.05),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+  ),
+),
                     ],
                   ),
                 ),
@@ -156,16 +194,16 @@ class _AdminLayoutState extends State<AdminLayout> {
   String _getSectionTitle() {
     switch (_selectedIndex) {
       case 0: return "Panel de Control General";
-      case 1: return "Análisis Estadístico"; // Título para la nueva sección
+      case 1: return "Análisis Estadístico";
       case 2: return "Reportes de Asistencia Mensual";
       case 3: return "Administración de Personal";
       default: return "Sistema INTESUD";
     }
   }
 
+  // Widget para items principales (como el Dashboard)
   Widget _menuItem(int index, IconData icon, String title) {
     bool isSelected = _selectedIndex == index;
-    
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
@@ -174,11 +212,7 @@ class _AdminLayoutState extends State<AdminLayout> {
       ),
       child: ListTile(
         onTap: () => setState(() => _selectedIndex = index),
-        leading: Icon(
-          icon, 
-          color: isSelected ? Colors.white : Colors.white60,
-          size: 22,
-        ),
+        leading: Icon(icon, color: isSelected ? Colors.white : Colors.white60, size: 22),
         title: Text(
           title, 
           style: TextStyle(
@@ -187,7 +221,30 @@ class _AdminLayoutState extends State<AdminLayout> {
             fontSize: 14,
           )
         ),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+    );
+  }
+
+  // Widget para los sub-items dentro de "Aplicación de Asistencia"
+  Widget _subMenuItem(int index, IconData icon, String title) {
+    bool isSelected = _selectedIndex == index;
+    return Container(
+      margin: const EdgeInsets.only(left: 30, right: 12, top: 2, bottom: 2),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        color: isSelected ? primaryColor.withOpacity(0.8) : Colors.transparent,
+      ),
+      child: ListTile(
+        onTap: () => setState(() => _selectedIndex = index),
+        dense: true,
+        leading: Icon(icon, color: isSelected ? Colors.white : Colors.white54, size: 18),
+        title: Text(
+          title, 
+          style: TextStyle(
+            color: isSelected ? Colors.white : Colors.white54,
+            fontSize: 13,
+          )
+        ),
       ),
     );
   }

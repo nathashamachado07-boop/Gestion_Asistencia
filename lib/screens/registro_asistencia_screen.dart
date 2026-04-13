@@ -10,6 +10,7 @@ import 'notificaciones_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'solicitudes/solicitud_form_screen.dart';
 
 class RegistroAsistenciaScreen extends StatefulWidget {
   final String nombreDocente;
@@ -275,27 +276,29 @@ bool _esNocturno() {
   @override
   Widget build(BuildContext context) {
     final List<Widget> vistas = [
-      _construirCuerpoInicioSelector(), 
-      EstadisticasScreen(nombreDocente: widget.nombreDocente),
-      NotificacionesScreen(correoUsuario: widget.correoUsuario),
-      PerfilScreen(correoUsuario: widget.correoUsuario),
-    ];
+    _construirCuerpoInicioSelector(),                         // Índice 0
+    EstadisticasScreen(nombreDocente: widget.nombreDocente),   // Índice 1
+    NotificacionesScreen(correoUsuario: widget.correoUsuario), // Índice 2 (Avisos)
+    SolicitudFormScreen(nombreDocente: widget.nombreDocente),  // Índice 3 (Solicitudes)
+    PerfilScreen(correoUsuario: widget.correoUsuario),         // Índice 4
+  ];
 
     return Scaffold(
       body: vistas[_indiceActual],
       bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _indiceActual,
-        onTap: (index) => setState(() => _indiceActual = index),
-        selectedItemColor: colorInstitucional,
-        unselectedItemColor: Colors.grey,
-        type: BottomNavigationBarType.fixed,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.assignment_ind_rounded), label: "Asistencia"),
-          BottomNavigationBarItem(icon: Icon(Icons.insert_chart_outlined_rounded), label: "Estadísticas"),
-          BottomNavigationBarItem(icon: Icon(Icons.notifications_active_outlined), label: "Avisos"),
-          BottomNavigationBarItem(icon: Icon(Icons.account_circle_outlined), label: "Perfil"),
-        ],
-      ),
+  currentIndex: _indiceActual,
+  onTap: (index) => setState(() => _indiceActual = index),
+  selectedItemColor: colorInstitucional,
+  unselectedItemColor: Colors.grey,
+  type: BottomNavigationBarType.fixed,
+  items: const [
+    BottomNavigationBarItem(icon: Icon(Icons.assignment_ind_rounded), label: "Asistencia"),     // 0
+    BottomNavigationBarItem(icon: Icon(Icons.insert_chart_outlined_rounded), label: "Estadísticas"), // 1
+    BottomNavigationBarItem(icon: Icon(Icons.notifications_active_outlined), label: "Avisos"),       // 2
+    BottomNavigationBarItem(icon: Icon(Icons.description_outlined), label: "Solicitudes"),          // 3
+    BottomNavigationBarItem(icon: Icon(Icons.account_circle_outlined), label: "Perfil"),            // 4
+  ],
+),
     );
   }
 

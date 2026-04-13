@@ -1,8 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'dart:html' as html;
 import '../services/pdf_service.dart';
+// IMPORTACIÓN CONDICIONAL: Esto es lo que permite que el APK compile
+import 'reportes_admin_web_stub.dart' if (dart.library.html) 'reportes_admin_web_real.dart';
 
 class ReportesAdminWeb extends StatefulWidget {
   const ReportesAdminWeb({super.key});
@@ -41,9 +42,6 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
         throw "Seleccione un mes y año válidos.";
       }
 
-      // Pasar TODOS los docs filtrados por mes/año — el pdf_service
-      // internamente usa solo los de tipo ENTRADA para la matriz,
-      // ignorando SALIDA y SALIDA ANTICIPADA de forma segura.
       if (docs.isEmpty) {
         throw "No hay registros de asistencia para el período seleccionado.";
       }
@@ -57,14 +55,13 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
 
       if (bytes.isEmpty) throw "No se pudo generar el PDF.";
 
-      // Descarga en el navegador
-      final blob = html.Blob([bytes], 'application/pdf');
-      final url  = html.Url.createObjectUrlFromBlob(blob);
-      html.AnchorElement(href: url)
-        ..setAttribute("download",
-            "Reporte_Asistencia_${_getNombreMes(mesSeleccionado!)}_$anioSeleccionado.pdf")
-        ..click();
-      html.Url.revokeObjectUrl(url);
+      // --- CAMBIO CLAVE PARA EL APK ---
+      // Usamos la función del archivo 'real' o 'stub' según la plataforma
+      descargarArchivoWeb(
+        bytes, 
+        "Reporte_Asistencia_${_getNombreMes(mesSeleccionado!)}_$anioSeleccionado.pdf"
+      );
+      // --------------------------------
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -238,10 +235,10 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
                         const Color(0xFF467879).withOpacity(0.08)),
                     columns: const [
                       DataColumn(label: Text('Docente',    style: TextStyle(fontWeight: FontWeight.bold))),
-                      DataColumn(label: Text('Fecha',      style: TextStyle(fontWeight: FontWeight.bold))),
-                      DataColumn(label: Text('Tipo',       style: TextStyle(fontWeight: FontWeight.bold))),
-                      DataColumn(label: Text('Estado',     style: TextStyle(fontWeight: FontWeight.bold))),
-                      DataColumn(label: Text('Hora',       style: TextStyle(fontWeight: FontWeight.bold))),
+                      DataColumn(label: Text('Fecha',       style: TextStyle(fontWeight: FontWeight.bold))),
+                      DataColumn(label: Text('Tipo',        style: TextStyle(fontWeight: FontWeight.bold))),
+                      DataColumn(label: Text('Estado',      style: TextStyle(fontWeight: FontWeight.bold))),
+                      DataColumn(label: Text('Hora',        style: TextStyle(fontWeight: FontWeight.bold))),
                     ],
                     rows: registros.map((doc) {
                       final data = doc.data() as Map<String, dynamic>;
