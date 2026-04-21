@@ -1,37 +1,64 @@
-import 'package:flutter/material.dart';
+import 'dart:typed_data';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fl_chart/fl_chart.dart';
-import '../services/firebase_service.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
+import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import '../models/app_branding.dart';
+import '../services/firebase_service.dart';
+
 class EstadisticasScreen extends StatefulWidget {
+  const EstadisticasScreen({
+    super.key,
+    required this.nombreDocente,
+    this.isSedeNorte = false,
+    this.sedeId,
+  });
+
   final String nombreDocente;
-  const EstadisticasScreen({super.key, required this.nombreDocente});
+  final bool isSedeNorte;
+  final String? sedeId;
 
   @override
   State<EstadisticasScreen> createState() => _EstadisticasScreenState();
 }
 
 class _EstadisticasScreenState extends State<EstadisticasScreen> {
-  static const Color _istsColor = Color(0xFF467879);
   bool _mostrarGrafica = false;
-
-  // 👇 LO DEMÁS SIGUE NORMAL
   final FirebaseService _service = FirebaseService();
   late Future<Map<String, int>> _estadisticasFuture;
-  String _mesSeleccionado = "Todos";
+  String _mesSeleccionado = 'Todos';
 
-  final List<String> _meses = [
-    "Todos",
-    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+  AppBranding get _branding => AppBranding.fromLegacy(
+        isSedeNorte: widget.isSedeNorte,
+        sedeId: widget.sedeId,
+      );
+
+  final List<String> _meses = const [
+    'Todos',
+    'Enero',
+    'Febrero',
+    'Marzo',
+    'Abril',
+    'Mayo',
+    'Junio',
+    'Julio',
+    'Agosto',
+    'Septiembre',
+    'Octubre',
+    'Noviembre',
+    'Diciembre',
   ];
 
   @override
   void initState() {
     super.initState();
     _cargarDatos();
-
     Future.delayed(const Duration(milliseconds: 500), () {
       if (mounted) setState(() => _mostrarGrafica = true);
     });
@@ -40,169 +67,273 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
   void _cargarDatos() {
     _estadisticasFuture = _service.obtenerEstadisticasDocente(
       widget.nombreDocente,
-      mes: _mesSeleccionado, // 👈 IMPORTANTE (debes adaptarlo en FirebaseService)
+      mes: _mesSeleccionado,
     );
   }
 
-  // 📄 GENERAR PDF
-  Future<void> _generarPDF(Map<String, int> data) async {
+  Future<void> _generarPDF(Map<String, int> dataSummary) async {
     final pdf = pw.Document();
+    final ByteData image = await rootBundle.load(_branding.logoPdf);
+    final Uint8List logoBytes = image.buffer.asUint8List();
+    final pw.MemoryImage logoImage = pw.MemoryImage(logoBytes);
+
+    final QuerySnapshot asistenciaSnapshot = await FirebaseFirestore.instance
+        .collection('asistencias_realizadas')
+        .where('docente', isEqualTo: widget.nombreDocente)
+        .get();
+
+    final registros = asistenciaSnapshot.docs.where((doc) {
+      if (_mesSeleccionado == 'Todos') return true;
+      final fecha = (doc['fecha'] as Timestamp).toDate();
+      final mesDoc = _meses[fecha.month];
+      return mesDoc == _mesSeleccionado;
+    }).toList();
 
     pdf.addPage(
-      pw.Page(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(35),
         build: (pw.Context context) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Text("Reporte de Asistencia",
-                  style: pw.TextStyle(fontSize: 20)),
-              pw.SizedBox(height: 10),
-              pw.Text("Docente: ${widget.nombreDocente}"),
-              pw.Text("Mes: $_mesSeleccionado"),
-              pw.SizedBox(height: 20),
-
-              pw.Text("Total Registros: ${data['Total']}"),
-              pw.Text("Puntuales: ${data['Puntual']}"),
-              pw.Text("Atrasos: ${data['Atraso']}"),
-              pw.Text("Salidas Anticipadas: ${data['Salida Anticipada']}"),
-            ],
-          );
+          return [
+            pw.Align(
+              alignment: pw.Alignment.topLeft,
+              child: pw.Image(logoImage, height: 65),
+            ),
+            pw.SizedBox(height: 15),
+            pw.Text(
+              'REPORTE DE ASISTENCIA',
+              style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.Text(
+              'Docente: ${widget.nombreDocente.toUpperCase()}',
+              style: const pw.TextStyle(fontSize: 12),
+            ),
+            pw.Text(
+              'Mes de consulta: $_mesSeleccionado',
+              style: const pw.TextStyle(fontSize: 11),
+            ),
+            pw.SizedBox(height: 10),
+            pw.Divider(thickness: 1, color: PdfColors.grey300),
+            pw.SizedBox(height: 10),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text(
+                  'Total Registros: ${dataSummary['Total']}',
+                  style: const pw.TextStyle(fontSize: 10),
+                ),
+                pw.Text(
+                  'Puntuales: ${dataSummary['Puntual']}',
+                  style: const pw.TextStyle(fontSize: 10),
+                ),
+                pw.Text(
+                  'Atrasos: ${dataSummary['Atraso']}',
+                  style: const pw.TextStyle(fontSize: 10),
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 20),
+            pw.TableHelper.fromTextArray(
+              headerStyle: pw.TextStyle(
+                color: PdfColors.white,
+                fontWeight: pw.FontWeight.bold,
+                fontSize: 10,
+              ),
+              headerDecoration: pw.BoxDecoration(
+                color: PdfColor.fromInt(_branding.primary.value),
+              ),
+              cellStyle: const pw.TextStyle(fontSize: 9),
+              cellPadding: const pw.EdgeInsets.all(5),
+              data: <List<String>>[
+                ['Fecha', 'Tipo', 'Estado', 'Hora Marcada'],
+                ...registros.map((doc) {
+                  final d = doc.data() as Map<String, dynamic>;
+                  final fecha = (d['fecha'] as Timestamp).toDate();
+                  return [
+                    DateFormat('dd/MM/yyyy').format(fecha),
+                    d['tipo'] ?? '-',
+                    d['estado'] ?? '-',
+                    d['hora_marcada'] ?? '--:--',
+                  ];
+                }),
+              ],
+            ),
+            pw.Padding(
+              padding: const pw.EdgeInsets.only(top: 20),
+              child: pw.Center(
+                child: pw.Text(
+                  'Generado desde aplicacion movil ${_branding.displayName}',
+                  style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey),
+                ),
+              ),
+            ),
+          ];
         },
       ),
     );
 
     await Printing.layoutPdf(
       onLayout: (format) async => pdf.save(),
+      name: 'Reporte_${widget.nombreDocente}_$_mesSeleccionado.pdf',
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F7F7),
-      appBar: AppBar(
-        title: const Text("Resumen Estadístico",
-            style: TextStyle(color: Colors.white, fontSize: 18)),
-        backgroundColor: _istsColor,
-        centerTitle: true,
-        elevation: 0,
-      ),
+      backgroundColor: _branding.background,
       body: Stack(
         children: [
+          Container(color: _branding.background),
           Positioned.fill(
-            child: Opacity(
-              opacity: 0.04,
-              child: Icon(Icons.grid_4x4_rounded,
-                  size: 400, color: _istsColor),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final double logoSize = _branding.mobilePatternLogoSize;
+                const double spacing = 75.0;
+                final int cols = (constraints.maxWidth / spacing).ceil() + 1;
+                final int rows = (constraints.maxHeight / spacing).ceil() + 1;
+                return Stack(
+                  children: List.generate(rows * cols, (index) {
+                    final int row = index ~/ cols;
+                    final int col = index % cols;
+                    final double offsetX = (row % 2 == 0) ? 0 : spacing / 2;
+                    return Positioned(
+                      left: col * spacing + offsetX - logoSize / 2,
+                      top: row * spacing - logoSize / 2,
+                      child: Opacity(
+                        opacity: 0.2,
+                        child: Image.asset(
+                          _branding.logoSmall,
+                          width: logoSize,
+                          height: logoSize,
+                          color: Colors.white,
+                          colorBlendMode: BlendMode.srcIn,
+                        ),
+                      ),
+                    );
+                  }),
+                );
+              },
             ),
           ),
           Column(
             children: [
-              // 🔽 FILTRO POR MES
-              Padding(
-                padding: const EdgeInsets.all(15),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 15),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(15),
+              Container(
+                height: 160,
+                padding: const EdgeInsets.only(top: 50, left: 20, right: 20),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [_branding.primary, _branding.primaryDark],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                   ),
-                  child: DropdownButton<String>(
-                    value: _mesSeleccionado,
-                    isExpanded: true,
-                    underline: const SizedBox(),
-                    items: _meses.map((mes) {
-                      return DropdownMenuItem(
-                        value: mes,
-                        child: Text(mes),
-                      );
-                    }).toList(),
-                    onChanged: (value) {
-                      setState(() {
-                        _mesSeleccionado = value!;
-                        _cargarDatos(); // 🔥 recarga datos
-                      });
-                    },
-                  ),
+                  borderRadius:
+                      const BorderRadius.vertical(bottom: Radius.circular(35)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.2),
+                      blurRadius: 15,
+                      offset: const Offset(0, 5),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    Image.asset(
+                      _branding.logoSmall,
+                      height: _branding.mobileHeaderLogoHeight,
+                      errorBuilder: (c, e, s) =>
+                          const Icon(Icons.school, size: 40, color: Colors.white),
+                    ),
+                    const SizedBox(height: 10),
+                    const Text(
+                      'RESUMEN ESTADISTICO',
+                      style: TextStyle(
+                        fontSize: 18,
+                        letterSpacing: 1.2,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-
               Expanded(
                 child: FutureBuilder<Map<String, int>>(
                   future: _estadisticasFuture,
                   builder: (context, snapshot) {
-                    if (snapshot.connectionState ==
-                        ConnectionState.waiting) {
-                      return const Center(
-                          child: CircularProgressIndicator(
-                              color: _istsColor));
-                    }
-
-                    if (snapshot.hasError || !snapshot.hasData) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
                       return Center(
-                          child: Text("Error al cargar datos: ${snapshot.error}"));
+                        child: CircularProgressIndicator(color: _branding.primary),
+                      );
                     }
-
+                    if (snapshot.hasError || !snapshot.hasData) {
+                      return const Center(child: Text('Error al cargar datos'));
+                    }
                     final data = snapshot.data!;
-
-                    if (data['Total'] == 0) {
-                      return const Center(
-                          child: Text(
-                              "No hay datos suficientes para generar estadísticas."));
-                    }
 
                     return SingleChildScrollView(
                       physics: const BouncingScrollPhysics(),
-                      padding: const EdgeInsets.all(20),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 10,
+                      ),
                       child: Column(
                         children: [
-                          const Text("Rendimiento de Asistencia",
-                              style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16)),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 15),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.9),
+                              borderRadius: BorderRadius.circular(15),
+                            ),
+                            child: DropdownButton<String>(
+                              value: _mesSeleccionado,
+                              isExpanded: true,
+                              underline: const SizedBox(),
+                              items: _meses
+                                  .map(
+                                    (mes) => DropdownMenuItem(
+                                      value: mes,
+                                      child: Text(mes),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: (value) {
+                                setState(() {
+                                  _mesSeleccionado = value!;
+                                  _cargarDatos();
+                                });
+                              },
+                            ),
+                          ),
+                          const SizedBox(height: 25),
+                          const Text(
+                            'Rendimiento de Asistencia',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
                           const SizedBox(height: 20),
-
-                          // 📊 GRÁFICA
                           SizedBox(
-                            height: 220,
+                            height: 200,
                             child: PieChart(
                               PieChartData(
                                 sections: [
-                                  PieChartSectionData(
-                                    value: _mostrarGrafica
-                                        ? (data['Puntual']
-                                                ?.toDouble() ??
-                                            0)
-                                        : 0,
-                                    color: Colors.green,
-                                    title: _mostrarGrafica
-                                        ? '${data['Puntual']}'
-                                        : '',
-                                    radius: 55,
+                                  _sectionData(
+                                    data['Puntual'],
+                                    Colors.green,
+                                    'Puntual',
                                   ),
-                                  PieChartSectionData(
-                                    value: _mostrarGrafica
-                                        ? (data['Atraso']
-                                                ?.toDouble() ??
-                                            0)
-                                        : 0,
-                                    color: Colors.orange,
-                                    title: _mostrarGrafica
-                                        ? '${data['Atraso']}'
-                                        : '',
-                                    radius: 55,
+                                  _sectionData(
+                                    data['Atraso'],
+                                    Colors.orange,
+                                    'Atraso',
                                   ),
-                                  PieChartSectionData(
-                                    value: _mostrarGrafica
-                                        ? (data['Salida Anticipada']
-                                                ?.toDouble() ??
-                                            0)
-                                        : 0,
-                                    color: Colors.redAccent,
-                                    title: _mostrarGrafica
-                                        ? '${data['Salida Anticipada']}'
-                                        : '',
-                                    radius: 55,
+                                  _sectionData(
+                                    data['Salida Anticipada'],
+                                    Colors.redAccent,
+                                    'Salida',
                                   ),
                                 ],
                                 sectionsSpace: 4,
@@ -210,41 +341,45 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
                               ),
                             ),
                           ),
-
                           const SizedBox(height: 30),
-
-                          // 📄 BOTÓN PDF
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton.icon(
                               onPressed: () => _generarPDF(data),
-                              icon: const Icon(Icons.picture_as_pdf),
-                              label: const Text("EXPORTAR REPORTE PDF"),
+                              icon: const Icon(
+                                Icons.picture_as_pdf,
+                                color: Colors.white,
+                              ),
+                              label: const Text(
+                                'EXPORTAR REPORTE PDF',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: _istsColor,
+                                backgroundColor: _branding.primary,
                                 padding:
-                                    const EdgeInsets.symmetric(
-                                        vertical: 12),
+                                    const EdgeInsets.symmetric(vertical: 12),
                                 shape: RoundedRectangleBorder(
-                                  borderRadius:
-                                      BorderRadius.circular(15),
+                                  borderRadius: BorderRadius.circular(15),
                                 ),
                               ),
                             ),
                           ),
-
                           const SizedBox(height: 30),
-
-                          _cardEstadistica("Total Registros",
-                              "${data['Total']}",
-                              Icons.list_alt, Colors.blueGrey),
-                          _cardEstadistica("Asistencias Puntuales",
-                              "${data['Puntual']}",
-                              Icons.check_circle, Colors.green),
-                          _cardEstadistica("Atrasos Detectados",
-                              "${data['Atraso']}",
-                              Icons.warning_amber_rounded,
-                              Colors.orange),
+                          _cardEstadistica(
+                            'Total Registros',
+                            '${data['Total']}',
+                            Icons.list_alt,
+                            Colors.blueGrey,
+                          ),
+                          _cardEstadistica(
+                            'Asistencias Puntuales',
+                            '${data['Puntual']}',
+                            Icons.check_circle,
+                            Colors.green,
+                          ),
                         ],
                       ),
                     );
@@ -258,18 +393,32 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
     );
   }
 
+  PieChartSectionData _sectionData(int? valor, Color color, String titulo) {
+    return PieChartSectionData(
+      value: _mostrarGrafica ? (valor?.toDouble() ?? 0) : 0,
+      color: color,
+      title: _mostrarGrafica ? '$valor' : '',
+      radius: 55,
+      titleStyle:
+          const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+    );
+  }
+
   Widget _cardEstadistica(
-      String titulo, String valor, IconData icono, Color color) {
+    String titulo,
+    String valor,
+    IconData icono,
+    Color color,
+  ) {
     return Container(
       margin: const EdgeInsets.only(bottom: 18),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
+        color: Colors.white.withOpacity(0.85),
+        borderRadius: BorderRadius.circular(30),
         boxShadow: [
           BoxShadow(
-            color: _istsColor.withValues(alpha: 0.08),
+            color: _branding.primary.withOpacity(0.1),
             blurRadius: 15,
-            spreadRadius: 2,
             offset: const Offset(0, 8),
           ),
         ],
@@ -280,22 +429,26 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
         leading: Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.1),
+            color: color.withOpacity(0.1),
             shape: BoxShape.circle,
           ),
           child: Icon(icono, color: color, size: 24),
         ),
-        title: Text(titulo,
-            style: const TextStyle(
-                fontSize: 13,
-                color: Colors.grey,
-                fontWeight: FontWeight.w500)),
+        title: Text(
+          titulo,
+          style: const TextStyle(
+            fontSize: 13,
+            color: Colors.grey,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
         trailing: Text(
           valor,
           style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: _istsColor.withValues(alpha: 0.8)),
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: _branding.primary.withOpacity(0.8),
+          ),
         ),
       ),
     );

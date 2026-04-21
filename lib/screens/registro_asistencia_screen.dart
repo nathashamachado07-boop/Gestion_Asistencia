@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:intl/intl.dart';
 import 'package:geolocator/geolocator.dart';
+import '../models/app_branding.dart';
 import '../services/firebase_service.dart';
 import 'historial_screen.dart';
 import 'perfil_screen.dart';
@@ -11,17 +12,22 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'solicitudes/solicitud_form_screen.dart';
+import 'dart:ui';
 
 class RegistroAsistenciaScreen extends StatefulWidget {
   final String nombreDocente;
   final List<dynamic> horariosDocente;
   final String correoUsuario;
+  final bool isSedeNorte;
+  final String? sedeId;
 
   const RegistroAsistenciaScreen({
     super.key,
     required this.nombreDocente,
     required this.horariosDocente,
-    required this.correoUsuario
+    required this.correoUsuario,
+    this.isSedeNorte = false,
+    this.sedeId,
   });
 
   @override
@@ -48,19 +54,21 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
   final LatLng _ubicacionInstituto = LatLng(latitudInstituto, longitudInstituto);
   
   Position? _posicionActual;
-  final Color colorInstitucional = const Color(0xFF467879);
-  final Color colorFondoSubtil = const Color(0xFFF4F7F7);
+  AppBranding get _branding => AppBranding.fromLegacy(
+        isSedeNorte: widget.isSedeNorte,
+        sedeId: widget.sedeId,
+      );
+  Color get colorInstitucional => _branding.primary;
+  Color get colorFondoVariacion => _branding.softAccent;
 
-  // Determina si el docente tiene contrato de Tiempo Completo
   bool _esTiempoCompleto() {
     return widget.horariosDocente.any((horario) => horario.toString().startsWith("TC"));
   }
-  // NUEVO: Detectar si es horario nocturno (HORARIO NOCTURNO)
-bool _esNocturno() {
-  return widget.horariosDocente.any((horario) => horario.toString().startsWith("NOCT"));
-}
 
-  // --- VALIDACIÓN DE HORARIO DE ALMUERZO ---
+  bool _esNocturno() {
+    return widget.horariosDocente.any((horario) => horario.toString().startsWith("NOCT"));
+  }
+
   Future<bool> _validarHorarioAlmuerzo() async {
     try {
       String idHorarioTC = widget.horariosDocente.firstWhere(
@@ -153,8 +161,6 @@ bool _esNocturno() {
       posicion.longitude,
     );
 
-    debugPrint("Distancia al instituto: $distancia metros");
-
     if (distancia <= 40) {
       return true;
     } else {
@@ -213,18 +219,14 @@ bool _esNocturno() {
       bool esHorarioValido = await _validarHorarioAlmuerzo();
 
       if (!esHorarioValido) {
-        _mostrarAlerta(
-          "Horario no permitido", 
-          "Aún no es su hora de almuerzo.", 
-          Colors.orange
-        );
+        _mostrarAlerta("Horario no permitido", "Aún no es su hora de almuerzo.", Colors.orange);
         return;
       }
 
-    if (!_esNocturno()) {
-  bool dentro = await _estaEnElInstituto();
-  if (!dentro) return;
-}
+      if (!_esNocturno()) {
+        bool dentro = await _estaEnElInstituto();
+        if (!dentro) return;
+      }
       if (_estadoAlmuerzo == "pendiente") {
         await _service.registrarInicioAlmuerzo(widget.correoUsuario);
       } else if (_estadoAlmuerzo == "en_almuerzo") {
@@ -255,8 +257,8 @@ bool _esNocturno() {
   Future<void> _ejecutarRegistro(bool esEntrada) async {
     try {
       if (!_esNocturno()) {
-  await _estaEnElInstituto();
-}
+        await _estaEnElInstituto();
+      }
       var res = await _service.registrarMarcacion(
         nombreUsuario: widget.nombreDocente,
         listaHorarios: widget.horariosDocente,
@@ -276,130 +278,230 @@ bool _esNocturno() {
   @override
   Widget build(BuildContext context) {
     final List<Widget> vistas = [
-    _construirCuerpoInicioSelector(),                         // Índice 0
-    EstadisticasScreen(nombreDocente: widget.nombreDocente),   // Índice 1
-    NotificacionesScreen(correoUsuario: widget.correoUsuario), // Índice 2 (Avisos)
-    SolicitudFormScreen(nombreDocente: widget.nombreDocente),  // Índice 3 (Solicitudes)
-    PerfilScreen(correoUsuario: widget.correoUsuario),         // Índice 4
+    _construirCuerpoInicioSelector(),
+    EstadisticasScreen(
+      nombreDocente: widget.nombreDocente,
+      sedeId: _branding.sedeId,
+    ),
+    NotificacionesScreen(
+      correoUsuario: widget.correoUsuario,
+      sedeId: _branding.sedeId,
+    ),
+    SolicitudFormScreen(
+      nombreDocente: widget.nombreDocente,
+      sedeId: _branding.sedeId,
+    ),
+    PerfilScreen(
+      correoUsuario: widget.correoUsuario,
+      sedeId: _branding.sedeId,
+    ),
   ];
 
     return Scaffold(
       body: vistas[_indiceActual],
       bottomNavigationBar: BottomNavigationBar(
-  currentIndex: _indiceActual,
-  onTap: (index) => setState(() => _indiceActual = index),
-  selectedItemColor: colorInstitucional,
-  unselectedItemColor: Colors.grey,
-  type: BottomNavigationBarType.fixed,
-  items: const [
-    BottomNavigationBarItem(icon: Icon(Icons.assignment_ind_rounded), label: "Asistencia"),     // 0
-    BottomNavigationBarItem(icon: Icon(Icons.insert_chart_outlined_rounded), label: "Estadísticas"), // 1
-    BottomNavigationBarItem(icon: Icon(Icons.notifications_active_outlined), label: "Avisos"),       // 2
-    BottomNavigationBarItem(icon: Icon(Icons.description_outlined), label: "Solicitudes"),          // 3
-    BottomNavigationBarItem(icon: Icon(Icons.account_circle_outlined), label: "Perfil"),            // 4
-  ],
-),
+        currentIndex: _indiceActual,
+        onTap: (index) => setState(() => _indiceActual = index),
+        selectedItemColor: colorInstitucional,
+        unselectedItemColor: Colors.grey,
+        type: BottomNavigationBarType.fixed,
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.assignment_ind_rounded), label: "Asistencia"),
+          BottomNavigationBarItem(icon: Icon(Icons.insert_chart_outlined_rounded), label: "Estadísticas"),
+          BottomNavigationBarItem(icon: Icon(Icons.notifications_active_outlined), label: "Avisos"),
+          BottomNavigationBarItem(icon: Icon(Icons.description_outlined), label: "Solicitudes"),
+          BottomNavigationBarItem(icon: Icon(Icons.account_circle_outlined), label: "Perfil"),
+        ],
+      ),
     );
   }
 
+  // --- MÉTODO MODIFICADO: SOLO EL FONDO CAMBIA ---
   Widget _construirCuerpoInicioSelector() {
-  return Scaffold(
-    backgroundColor: colorFondoSubtil,
-    appBar: AppBar(
-      backgroundColor: colorInstitucional,
-      elevation: 0,
-      toolbarHeight: 90,
-      centerTitle: true,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(bottom: Radius.circular(30))),
-      title: Column(
-        mainAxisSize: MainAxisSize.min,
+    final bool isCentro = _branding.sedeId == AppBranding.sedeCentro.sedeId;
+    final String tituloAsistencia = _branding.sedeId == AppBranding.sedeNorte.sedeId
+        ? "ASISTENCIA SEDE NORTE"
+        : isCentro
+            ? "ASISTENCIA SEDE CENTRO"
+            : _branding.sedeId == AppBranding.sedeCreSer.sedeId
+                ? "ASISTENCIA CRE SER"
+                : "REGISTRO DE ASISTENCIA";
+
+    return Scaffold(
+      body: Stack(
         children: [
-          Image.asset(
-            'assets/images/logo_intesud1.png',
-            height: 50,
-            errorBuilder: (c, e, s) =>
-                const Icon(Icons.school, size: 40, color: Colors.white),
-          ),
-          const SizedBox(height: 5),
-          const Text(
-            "Registro de Asistencia INTESUD",
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
-              shadows: [
-                Shadow(
-                  offset: Offset(1, 1),
-                  blurRadius: 3,
-                  color: Colors.black26,
-                ),
-              ],
+          // 1. FONDO BASE CON COLOR #8CBAB3
+          Container(color: _branding.background),
+
+          // 2. PATRÓN DE "S" PEQUEÑAS REPETIDAS EN EL FONDO (logo_intesud2.png)
+          Positioned.fill(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final double logoSize = _branding.mobilePatternLogoSize;
+                const double spacing = 75.0;
+                final int cols = (constraints.maxWidth / spacing).ceil() + 1;
+                final int rows = (constraints.maxHeight / spacing).ceil() + 1;
+
+                return Stack(
+                  children: List.generate(rows * cols, (index) {
+                    final int row = index ~/ cols;
+                    final int col = index % cols;
+                    final double offsetX = (row % 2 == 0) ? 0 : spacing / 2;
+                    final double left = col * spacing + offsetX - logoSize / 2;
+                    final double top = row * spacing - logoSize / 2;
+
+                    return Positioned(
+                      left: left,
+                      top: top,
+                      child: Opacity(
+                        opacity: 0.13,
+                        child: Image.asset(
+  _branding.logoSmall,
+  width: logoSize,
+  height: logoSize,
+  fit: BoxFit.contain,
+  color: Colors.white,                 // <-- CAMBIO
+  colorBlendMode: BlendMode.srcIn,
+                        ),
+                      ),
+                    );
+                  }),
+                );
+              },
             ),
+          ),
+
+          // 3. LOGO GRANDE DE FONDO CENTRAL (logo_intesud2.png) — se mantiene igual
+          Center(
+            child: Opacity(
+              opacity: 0.12,
+              child: ShaderMask(
+                shaderCallback: (rect) {
+                  return LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      colorInstitucional.withOpacity(0.8),
+                      Colors.transparent,
+                    ],
+                  ).createShader(rect);
+                },
+                blendMode: BlendMode.srcATop,
+                child: Image.asset(
+                  _branding.logoWatermark,
+                  width: MediaQuery.of(context).size.width *
+                      _branding.mobileWatermarkWidthFactor,
+                  fit: BoxFit.contain,
+                ),
+              ),
+            ),
+          ),
+
+          // 4. CONTENIDO PRINCIPAL — sin ningún cambio
+          Column(
+            children: [
+              Container(
+                height: 160,
+                padding: const EdgeInsets.only(top: 50, left: 20, right: 20),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [colorInstitucional, _branding.primaryDark],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: const BorderRadius.vertical(bottom: Radius.circular(35)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.2),
+                      blurRadius: 15,
+                      offset: const Offset(0, 5),
+                    )
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    Image.asset(
+                      _branding.logoSmall,
+                      height: _branding.mobileHeaderLogoHeight,
+                      errorBuilder: (c, e, s) => const Icon(Icons.school, size: 40, color: Colors.white),
+                    ),
+                    const SizedBox(height: 10),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Text(
+                      tituloAsistencia,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: isCentro ? 16 : 18,
+                        letterSpacing: isCentro ? 0.8 : 1.2,
+                        height: 1.15,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 25.0),
+                child: Container(
+                  height: 55,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.8),
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(color: Colors.black12, blurRadius: 10, offset: const Offset(0, 4))
+                    ]
+                  ),
+                  child: Row(
+                    children: [
+                      _buildBotonSelector(0, "ASISTENCIA"),
+                      if (_esTiempoCompleto()) 
+                        _buildBotonSelector(1, "ALMUERZO"),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+
+              Expanded(
+                child: SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
+                  padding: const EdgeInsets.all(25.0),
+                  child: (_pestanaInternaActiva == 0 || !_esTiempoCompleto())
+                      ? _construirContenidoAsistencia()
+                      : _construirContenidoAlmuerzoSolo(),
+                ),
+              ),
+            ],
           ),
         ],
       ),
-    ),
-    body: Column(
-      children: [
-        const SizedBox(height: 20),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 25.0),
-          child: Container(
-            height: 55,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(15),
-              boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 10, offset: const Offset(0, 5))]
-            ),
-            child: Row(
-              children: [
-                _buildBotonSelector(0, "REGISTRO DE ASISTENCIA"),
-                if (_esTiempoCompleto()) 
-                  _buildBotonSelector(1, "REGISTRO DE ALMUERZO"),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 10),
-        Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(25.0),
-            child: (_pestanaInternaActiva == 0 || !_esTiempoCompleto())
-                ? _construirContenidoAsistencia()
-                : _construirContenidoAlmuerzoSolo(),
-          ),
-        ),
-      ],
-    ),
-  );
-}
+    );
+  }
   Widget _buildBotonSelector(int index, String texto) {
     bool estaActivo = _pestanaInternaActiva == index;
     return Expanded(
       child: GestureDetector(
         onTap: () => setState(() => _pestanaInternaActiva = index),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 250),
-          margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+          duration: const Duration(milliseconds: 300),
+          margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: estaActivo ? colorInstitucional : Colors.transparent, 
-            borderRadius: BorderRadius.circular(12)
+            borderRadius: BorderRadius.circular(15),
+            boxShadow: estaActivo ? [BoxShadow(color: colorInstitucional.withOpacity(0.4), blurRadius: 4)] : null,
           ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2),
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                texto, 
-                textAlign: TextAlign.center, 
-                style: TextStyle(
-                  fontSize: 10, 
-                  fontWeight: estaActivo ? FontWeight.bold : FontWeight.normal, 
-                  color: estaActivo ? Colors.white : Colors.grey[700]
-                ),
-              ),
+          child: Text(
+            texto, 
+            style: TextStyle(
+              fontSize: 11, 
+              fontWeight: FontWeight.bold, 
+              color: estaActivo ? Colors.white : colorInstitucional.withOpacity(0.6)
             ),
           ),
         ),
@@ -408,80 +510,76 @@ bool _esNocturno() {
   }
 
   Widget _buildMapaMini() {
-  return Container(
-    height: 180,
-    margin: const EdgeInsets.symmetric(vertical: 15),
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(20),
-      border: Border.all(color: Colors.white, width: 4),
-      boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 8)]
-    ),
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(16),
-      child: FlutterMap(
-        options: MapOptions(
-          initialCenter: _posicionActual != null
-              ? LatLng(_posicionActual!.latitude, _posicionActual!.longitude)
-              : _ubicacionInstituto,
-          initialZoom: 16,
-        ),
-        children: [
-          // 🗺️ MAPA BASE (CartoDB Voyager)
-          TileLayer(
-            urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-            subdomains: const ['a', 'b', 'c', 'd'],
-            userAgentPackageName: 'com.example.app',
-          ),
-
-          // 📍 MARCADOR DEL INSTITUTO
-          MarkerLayer(
-            markers: [
-              Marker(
-                point: _ubicacionInstituto,
-                width: 40,
-                height: 40,
-                child: const Icon(Icons.location_on, color: Colors.red, size: 35),
-              ),
-
-              // 📍 TU UBICACIÓN ACTUAL
-              if (_posicionActual != null)
-                Marker(
-                  point: LatLng(
-                    _posicionActual!.latitude,
-                    _posicionActual!.longitude,
-                  ),
-                  width: 40,
-                  height: 40,
-                  child: const Icon(Icons.person_pin_circle, color: Colors.blue, size: 35),
-                ),
-            ],
-          ),
-        ],
+    return Container(
+      height: 180,
+      margin: const EdgeInsets.symmetric(vertical: 15),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(25),
+        border: Border.all(color: Colors.white, width: 5),
+        boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 12, offset: const Offset(0, 5))]
       ),
-    ),
-  );
-}
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: FlutterMap(
+          options: MapOptions(
+            initialCenter: _posicionActual != null
+                ? LatLng(_posicionActual!.latitude, _posicionActual!.longitude)
+                : _ubicacionInstituto,
+            initialZoom: 16,
+          ),
+          children: [
+            TileLayer(
+              urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+              subdomains: const ['a', 'b', 'c', 'd'],
+            ),
+            MarkerLayer(
+              markers: [
+                Marker(
+                  point: _ubicacionInstituto,
+                  width: 45,
+                  height: 45,
+                  child: const Icon(Icons.location_on, color: Colors.red, size: 40),
+                ),
+                if (_posicionActual != null)
+                  Marker(
+                    point: LatLng(_posicionActual!.latitude, _posicionActual!.longitude),
+                    width: 45,
+                    height: 45,
+                    child: const Icon(Icons.person_pin_circle, color: Colors.blue, size: 40),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _construirContenidoAsistencia() {
     return Column(
       children: [
         _buildRelojCard(),
         const SizedBox(height: 15),
-        // --- TARJETA DE ESTADO DE JORNADA ---
         Container(
-          padding: const EdgeInsets.all(15),
+          padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
-            color: colorInstitucional.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(15),
+            color: Colors.white.withOpacity(0.85),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: colorInstitucional.withOpacity(0.1)),
+            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10)]
           ),
           child: Row(
             children: [
-              Icon(Icons.wb_sunny_outlined, color: colorInstitucional, size: 24),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: colorInstitucional.withOpacity(0.1), shape: BoxShape.circle),
+                child: Icon(Icons.wb_sunny_rounded, color: colorInstitucional, size: 22),
+              ),
               const SizedBox(width: 15),
               const Expanded(
                 child: Text(
-                  "Hoy entraste a las 08:00 AM. Te faltan 3 horas para completar tu jornada.",
-                  style: TextStyle(fontSize: 12, color: Colors.black87),
+                  "Tu jornada está activa. Recuerda marcar a tiempo tus ingresos y salidas.",
+                  style: TextStyle(fontSize: 12, color: Colors.black87, height: 1.4),
                 ),
               ),
             ],
@@ -491,7 +589,7 @@ bool _esNocturno() {
         const SizedBox(height: 10),
         _botonAsistencia(
           titulo: "MARCAR ENTRADA",
-          subtitulo: "Registrar inicio de labores",
+          subtitulo: "Iniciar registro de hoy",
           icon: Icons.login_rounded,
           color: colorInstitucional,
           onTap: () => _ejecutarRegistro(true),
@@ -499,9 +597,9 @@ bool _esNocturno() {
         const SizedBox(height: 15),
         _botonAsistencia(
           titulo: "MARCAR SALIDA",
-          subtitulo: "Registrar fin de jornada",
+          subtitulo: "Finalizar labores",
           icon: Icons.logout_rounded,
-          color: const Color(0xFF34495E),
+          color: const Color(0xFF2C3E50),
           onTap: () => _ejecutarRegistro(false),
         ),
         const SizedBox(height: 25),
@@ -525,12 +623,25 @@ bool _esNocturno() {
 
   Widget _buildRelojCard() {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 20),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: colorInstitucional.withValues(alpha: 0.1))),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.85), 
+        borderRadius: BorderRadius.circular(25), 
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 15, offset: const Offset(0, 4))],
+        border: Border.all(color: colorInstitucional.withOpacity(0.1))
+      ),
       child: Column(
         children: [
-          Text(_horaActual, style: TextStyle(fontSize: 32, fontWeight: FontWeight.w300, color: colorInstitucional, letterSpacing: 2)),
-          Text(_fechaActual.toUpperCase(), style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold, letterSpacing: 1)),
+          Text(
+            _horaActual, 
+            style: TextStyle(fontSize: 40, fontWeight: FontWeight.w200, color: colorInstitucional, letterSpacing: 3)
+          ),
+          const SizedBox(height: 5),
+          Text(
+            _fechaActual.toUpperCase(), 
+            style: TextStyle(fontSize: 11, color: Colors.grey[600], fontWeight: FontWeight.bold, letterSpacing: 1.5)
+          ),
         ],
       ),
     );
@@ -542,35 +653,60 @@ bool _esNocturno() {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(25),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 15, offset: const Offset(0, 8))], border: Border.all(color: colorInstitucional.withValues(alpha: 0.05))),
+      padding: const EdgeInsets.all(30),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.85), 
+        borderRadius: BorderRadius.circular(30), 
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 20)], 
+        border: Border.all(color: colorInstitucional.withOpacity(0.08))
+      ),
       child: Column(
         children: [
-          Icon(Icons.restaurant_menu_rounded, color: colorInstitucional, size: 40),
-          const SizedBox(height: 15),
-          const Text("CONTROL DE JORNADA DE ALMUERZO", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(15),
+            decoration: BoxDecoration(color: colorInstitucional.withOpacity(0.1), shape: BoxShape.circle),
+            child: Icon(Icons.restaurant_rounded, color: colorInstitucional, size: 35),
+          ),
+          const SizedBox(height: 20),
+          const Text("JORNADA DE ALMUERZO", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, letterSpacing: 1)),
+          const SizedBox(height: 10),
           const Text(
-            "Recuerda registrar el inicio y fin de tu tiempo de descanso.",
+            "Gestione sus tiempos de descanso conforme a su horario asignado.",
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.grey, fontSize: 12),
+            style: TextStyle(color: Colors.grey, fontSize: 12, height: 1.5),
           ),
           const SizedBox(height: 25),
-          if (_horaAlmuerzoInicio != "--:--") Text("Salida: $_horaAlmuerzoInicio | Regreso: $_horaAlmuerzoFin", style: const TextStyle(color: Colors.black54, fontSize: 12)),
-          const SizedBox(height: 15),
+          if (_horaAlmuerzoInicio != "--:--") 
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+              decoration: BoxDecoration(color: Colors.black.withOpacity(0.05), borderRadius: BorderRadius.circular(10)),
+              child: Text("Salida: $_horaAlmuerzoInicio  •  Regreso: $_horaAlmuerzoFin", style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.w600, fontSize: 12)),
+            ),
+          const SizedBox(height: 20),
           if (finalizado)
-            const Text("¡Almuerzo completado hoy!", style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold))
+            const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.check_circle, color: Colors.green, size: 18),
+                SizedBox(width: 8),
+                Text("Almuerzo registrado correctamente", style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 13)),
+              ],
+            )
           else
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _gestionarAlmuerzo,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: enCurso ? Colors.redAccent : Colors.orange, 
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                  padding: const EdgeInsets.symmetric(vertical: 12)
+                  backgroundColor: enCurso ? Colors.redAccent : Colors.orange[700], 
+                  elevation: 4,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                  padding: const EdgeInsets.symmetric(vertical: 16)
                 ),
-                child: Text(enCurso ? "FINALIZAR ALMUERZO" : "INICIAR HORA DE ALMUERZO"),
+                child: Text(
+                  enCurso ? "FINALIZAR ALMUERZO" : "INICIAR ALMUERZO",
+                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                ),
               ),
             ),
         ],
@@ -582,10 +718,24 @@ bool _esNocturno() {
     return SizedBox(
       width: double.infinity,
       child: OutlinedButton.icon(
-        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (c) => HistorialScreen(nombreDocente: widget.nombreDocente, esAlmuerzo: esAlmuerzo))),
-        icon: const Icon(Icons.history),
-        label: Text(esAlmuerzo ? "HISTORIAL ALMUERZO" : "HISTORIAL REGISTROS"),
-        style: OutlinedButton.styleFrom(foregroundColor: colorInstitucional, side: BorderSide(color: colorInstitucional.withValues(alpha: 0.5)), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
+        onPressed: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (c) => HistorialScreen(
+              nombreDocente: widget.nombreDocente,
+              esAlmuerzo: esAlmuerzo,
+              sedeId: _branding.sedeId,
+            ),
+          ),
+        ),
+        icon: const Icon(Icons.history_rounded),
+        label: Text(esAlmuerzo ? "HISTORIAL DE ALMUERZOS" : "HISTORIAL DE REGISTROS"),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: colorInstitucional, 
+          side: BorderSide(color: colorInstitucional.withOpacity(0.4), width: 1.5), 
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18))
+        ),
       ),
     );
   }
@@ -594,16 +744,32 @@ bool _esNocturno() {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(15),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 10)]),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.9), 
+          borderRadius: BorderRadius.circular(25), 
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 12, offset: const Offset(0, 4))],
+          border: Border.all(color: color.withOpacity(0.1))
+        ),
         child: Row(
           children: [
-            Icon(icon, color: color, size: 30),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(15)),
+              child: Icon(icon, color: color, size: 28),
+            ),
             const SizedBox(width: 20),
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(titulo, style: TextStyle(fontWeight: FontWeight.bold, color: color)),
-              Text(subtitulo, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-            ]),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start, 
+                children: [
+                  Text(titulo, style: TextStyle(fontWeight: FontWeight.bold, color: color, fontSize: 15)),
+                  const SizedBox(height: 4),
+                  Text(subtitulo, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                ]
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, color: Colors.grey[400]),
           ],
         ),
       ),

@@ -1,20 +1,27 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+
+import '../config/app_config.dart';
+import '../models/app_branding.dart';
 import '../services/firebase_service.dart';
+import '../web/admin_layout.dart';
 import 'registro_asistencia_screen.dart';
 import 'rrhh/nav_rrhh_screen.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
-import '../web/admin_layout.dart';
-import 'package:flutter_application_1/web/reportes_admin_web.dart' 
-    if (dart.library.io) 'package:flutter_application_1/web/reportes_admin_web_stub.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({
+    super.key,
+    this.appConfig = AppConfig.matriz,
+  });
+
+  final AppConfig appConfig;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStateMixin {
+class _LoginScreenState extends State<LoginScreen>
+    with SingleTickerProviderStateMixin {
   final TextEditingController _correoController = TextEditingController();
   final TextEditingController _passController = TextEditingController();
   final FirebaseService _service = FirebaseService();
@@ -23,9 +30,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
 
-  // --- NUEVA PALETA DE COLORES CLARA Y PROFESIONAL ---
-  static const Color _primary = Color(0xFF467879); // Tu color identidad
-  static const Color _bgSoft = Color(0xFFF0F4F4); // Fondo muy claro para limpieza
+  AppBranding get _branding => AppBranding.matriz;
 
   @override
   void initState() {
@@ -46,87 +51,89 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     super.dispose();
   }
 
-  void _iniciarSesion() async {
+  Future<void> _iniciarSesion() async {
     setState(() => _cargando = true);
 
-    var datosUsuario = await _service.validarLogin(
+    final datosUsuario = await _service.validarLogin(
       _correoController.text.trim(),
       _passController.text.trim(),
     );
 
     setState(() => _cargando = false);
 
-    if (datosUsuario != null) {
+    if (datosUsuario == null) {
       if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Correo o contrasena incorrectos')),
+      );
+      return;
+    }
 
-      String rolDB = datosUsuario['rol']?.toString() ?? 'Docente';
-      String rolLimpio = rolDB.trim().toUpperCase();
+    if (!mounted) return;
 
-      // 1. SOLO RRHH va a la pantalla de reportes/web
-      if (rolLimpio == 'RRHH') {
-        if (kIsWeb) {
-          Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (context) => const AdminLayout()), 
-    );
-        } else {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (context) => NavRRHHScreen()),
-          );
-        }
-      } 
-      // 2. ADMINISTRATIVOS Y DOCENTES van a la pantalla de asistencia
-      else {
-        String nombre = datosUsuario['nombre'] ?? 'Usuario';
-        String correo = _correoController.text.trim();
-        
-        // Convertimos el array de horarios de Firebase a una Lista de Strings
-        List<String> listaHorarios = [];
-        if (datosUsuario['horarios_asignados'] != null && datosUsuario['horarios_asignados'] is List) {
-          listaHorarios = List<String>.from(datosUsuario['horarios_asignados']);
-        } else {
-          listaHorarios = ['Sin horario asignado'];
-        }
+    final rolDB = datosUsuario['rol']?.toString() ?? 'Docente';
+    final rolLimpio = rolDB.trim().toUpperCase();
+    final usuarioSedeId = SedeAccess.resolveSedeId(datosUsuario);
 
-        // REDIRECCIÓN CORRECTA: Pasando los 3 parámetros requeridos
+    if (rolLimpio == 'RRHH') {
+      if (kIsWeb) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (context) => RegistroAsistenciaScreen(
-              nombreDocente: nombre,      // Parámetro 1
-              horariosDocente: listaHorarios, // Parámetro 2 (como Lista)
-              correoUsuario: correo,      // Parámetro 3
+            builder: (context) => AdminLayout(
+              userData: datosUsuario,
             ),
           ),
         );
+      } else {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => NavRRHHScreen()),
+        );
       }
-    } else {
-      // Error de login
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Correo o contraseña incorrectos")),
-      );
+      return;
     }
+
+    final nombre = datosUsuario['nombre'] ?? 'Usuario';
+    final correo = _correoController.text.trim();
+
+    List<String> listaHorarios = [];
+    if (datosUsuario['horarios_asignados'] != null &&
+        datosUsuario['horarios_asignados'] is List) {
+      listaHorarios = List<String>.from(datosUsuario['horarios_asignados']);
+    } else {
+      listaHorarios = ['Sin horario asignado'];
+    }
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (context) => RegistroAsistenciaScreen(
+          nombreDocente: nombre,
+          horariosDocente: listaHorarios,
+          correoUsuario: correo,
+          sedeId: usuarioSedeId,
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _bgSoft, // Fondo general claro
+      backgroundColor: _branding.surface,
       body: Stack(
         children: [
-          // SECCIÓN SUPERIOR: Panel curvo con tu color de identidad
           Container(
             height: MediaQuery.of(context).size.height * 0.45,
-            decoration: const BoxDecoration(
-              color: _primary,
-              borderRadius: BorderRadius.only(
+            decoration: BoxDecoration(
+              color: _branding.primary,
+              borderRadius: const BorderRadius.only(
                 bottomLeft: Radius.circular(60),
                 bottomRight: Radius.circular(60),
               ),
             ),
           ),
-          
           SafeArea(
             child: Center(
               child: SingleChildScrollView(
@@ -135,47 +142,50 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                   opacity: _fadeAnim,
                   child: Column(
                     children: [
-                      // LOGO E INSTITUCIÓN
                       Container(
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
                           color: Colors.white,
                           shape: BoxShape.circle,
                           boxShadow: [
-                            BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 20)
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.1),
+                              blurRadius: 20,
+                            ),
                           ],
                         ),
                         child: Image.asset(
-                          'assets/images/logo_intesud.png',
+                          _branding.logoHeader,
                           width: 90,
                           height: 90,
-                          errorBuilder: (context, error, stackTrace) => 
-                              const Icon(Icons.school, color: _primary, size: 50),
+                          errorBuilder: (context, error, stackTrace) => Icon(
+                            Icons.school,
+                            color: _branding.primary,
+                            size: 50,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 14),
-                      const Text(
-                        "INTESUD",
-                        style: TextStyle(
+                      Text(
+                        _branding.displayName,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 28,
                           fontWeight: FontWeight.bold,
                           letterSpacing: 2,
                         ),
                       ),
-                      const Text(
-                        "Instituto Superior Tecnológico Sudamericano",
+                      Text(
+                        _branding.subtitle,
                         textAlign: TextAlign.center,
-                        style: TextStyle(
+                        style: const TextStyle(
                           color: Colors.white70,
                           fontSize: 12,
                           fontWeight: FontWeight.w400,
                         ),
                       ),
-                      
                       const SizedBox(height: 35),
-
-                      // TARJETA BLANCA: El cuadro que pediste para los datos
                       Container(
                         padding: const EdgeInsets.all(28),
                         decoration: BoxDecoration(
@@ -186,61 +196,54 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                               color: Colors.black.withOpacity(0.08),
                               blurRadius: 25,
                               offset: const Offset(0, 10),
-                            )
+                            ),
                           ],
                         ),
                         child: Column(
                           children: [
-                            const Text(
-                              "Bienvenido",
+                            Text(
+                              'Bienvenido',
                               style: TextStyle(
                                 fontSize: 22,
                                 fontWeight: FontWeight.bold,
-                                color: _primary,
+                                color: _branding.primary,
                               ),
                             ),
                             const SizedBox(height: 25),
-                            
-                            // Campo Correo
                             _buildTextField(
                               controller: _correoController,
-                              hint: "Correo Institucional",
+                              hint: 'Correo institucional',
                               icon: Icons.email_outlined,
                             ),
-
                             const SizedBox(height: 18),
-
-                            // Campo Contraseña
                             _buildTextField(
                               controller: _passController,
-                              hint: "Contraseña",
+                              hint: 'Contrasena',
                               icon: Icons.lock_outline,
                               isPassword: true,
                             ),
-
                             const SizedBox(height: 10),
-                            
-                            // Olvidar contraseña
                             Align(
                               alignment: Alignment.centerRight,
                               child: TextButton(
                                 onPressed: () {},
-                                child: const Text(
-                                  "¿Olvidaste tu contraseña?",
-                                  style: TextStyle(color: _primary, fontSize: 12, fontWeight: FontWeight.bold),
+                                child: Text(
+                                  'Olvidaste tu contrasena?',
+                                  style: TextStyle(
+                                    color: _branding.primary,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
                               ),
                             ),
-
                             const SizedBox(height: 20),
-
-                            // BOTÓN DE ACCIÓN SÓLIDO
                             SizedBox(
                               width: double.infinity,
                               height: 55,
                               child: ElevatedButton(
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: _primary,
+                                  backgroundColor: _branding.primary,
                                   foregroundColor: Colors.white,
                                   elevation: 4,
                                   shape: RoundedRectangleBorder(
@@ -258,7 +261,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                                         ),
                                       )
                                     : const Text(
-                                        "INICIAR SESIÓN",
+                                        'INICIAR SESION',
                                         style: TextStyle(
                                           fontWeight: FontWeight.bold,
                                           fontSize: 16,
@@ -270,14 +273,11 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                           ],
                         ),
                       ),
-
                       const SizedBox(height: 40),
-
-                      // FOOTER
-                      const Text(
-                        "INTESUD - Sistema de Gestión",
+                      Text(
+                        '${_branding.displayName} - Sistema de Gestion',
                         style: TextStyle(
-                          color: _primary,
+                          color: _branding.primary,
                           fontSize: 11,
                           fontWeight: FontWeight.w500,
                         ),
@@ -307,7 +307,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       decoration: InputDecoration(
         hintText: hint,
         hintStyle: const TextStyle(color: Colors.grey, fontSize: 14),
-        prefixIcon: Icon(icon, color: _primary, size: 22),
+        prefixIcon: Icon(icon, color: _branding.primary, size: 22),
         suffixIcon: isPassword
             ? IconButton(
                 icon: Icon(
@@ -315,20 +315,22 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                   color: Colors.grey,
                   size: 22,
                 ),
-                onPressed: () => setState(() => _mostrarPassword = !_mostrarPassword),
+                onPressed: () =>
+                    setState(() => _mostrarPassword = !_mostrarPassword),
               )
             : null,
         filled: true,
-        fillColor: _bgSoft, // Color suave dentro del cuadro
+        fillColor: _branding.surface,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(15),
           borderSide: BorderSide.none,
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(15),
-          borderSide: const BorderSide(color: _primary, width: 1.5),
+          borderSide: BorderSide(color: _branding.primary, width: 1.5),
         ),
-        contentPadding: const EdgeInsets.symmetric(vertical: 18, horizontal: 20),
+        contentPadding:
+            const EdgeInsets.symmetric(vertical: 18, horizontal: 20),
       ),
     );
   }

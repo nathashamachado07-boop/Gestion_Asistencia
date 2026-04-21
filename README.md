@@ -1,17 +1,60 @@
-# flutter_application_1
+# Gestion Asistencia
 
-A new Flutter project.
+Proyecto Flutter con dos apps independientes:
 
-## Getting Started
+- `Matriz`
+- `Sede Norte`
 
-This project is a starting point for a Flutter application.
+## Entry points
 
-A few resources to get you started if this is your first Flutter project:
+- `lib/main.dart`: app matriz por defecto
+- `lib/main_matriz.dart`: app matriz explicita
+- `lib/main_sede_norte.dart`: app sede norte
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+## Reglas de acceso
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+- La app `Matriz` bloquea usuarios identificados como `Princesa de Gales Norte`.
+- La app `Sede Norte` solo permite usuarios de `Princesa de Gales Norte`.
+- El bloqueo aplica en login movil y login web.
+
+## Ejecutar en web
+
+Matriz:
+
+```bash
+flutter run -d chrome -t lib/main_matriz.dart
+```
+
+Sede Norte:
+
+```bash
+flutter run -d chrome -t lib/main_sede_norte.dart
+```
+
+## Ejecutar en Android
+
+Matriz:
+
+```bash
+flutter run --flavor matriz -t lib/main_matriz.dart
+```
+
+Sede Norte:
+
+```bash
+flutter run --flavor norte -t lib/main_sede_norte.dart
+```
+
+## Build Android
+
+APK Matriz:
+
+```bash
+flutter build apk --flavor matriz -t lib/main_matriz.dart
+```
+
+APK Sede Norte:
+
+```bash
+flutter build apk --flavor norte -t lib/main_sede_norte.dart
+```

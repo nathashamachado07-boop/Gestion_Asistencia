@@ -44,16 +44,409 @@ class FirebaseService {
   print("Documentos encontrados: ${userQuery.docs.length}"); // Si sale 0, el correo no coincide
 
   if (userQuery.docs.isNotEmpty) {
-    var data = userQuery.docs.first.data() as Map<String, dynamic>;
+    final doc = userQuery.docs.first;
+    var data = doc.data() as Map<String, dynamic>;
     print("Password en DB: ${data['password']}");
     print("Password ingresada: $password");
     
     if (data['password'] == password) {
-      return data;
+      return {
+        ...data,
+        'docId': doc.id,
+      };
     }
   }
   return null;
 }
+
+  Future<Map<String, dynamic>?> validarLoginPorSede({
+    required String correo,
+    required String password,
+    required String sedeId,
+  }) async {
+    final userQuery = await _db
+        .collection('usuarios')
+        .where('correo', isEqualTo: correo.trim())
+        .where('sedeId', isEqualTo: sedeId)
+        .get();
+
+    if (userQuery.docs.isNotEmpty) {
+      final doc = userQuery.docs.first;
+      final data = doc.data() as Map<String, dynamic>;
+
+      if (data['password'] == password) {
+        return {
+          ...data,
+          'docId': doc.id,
+        };
+      }
+    }
+
+    return null;
+  }
+
+  Future<Map<String, dynamic>> _activarSedeEspecial({
+    required Map<String, dynamic> userData,
+    required String sedeId,
+    required String sedeNombre,
+    required String logoAsset,
+    required Map<String, String> colores,
+  }) async {
+    final userDocId = userData['docId']?.toString();
+    if (userDocId == null || userDocId.isEmpty) {
+      throw Exception('No se encontro el documento del usuario RRHH.');
+    }
+
+    await _db.collection('sedes').doc(sedeId).set({
+      'nombre': sedeNombre,
+      'slug': sedeId,
+      'estado': 'activa',
+      'colores': colores,
+      'branding': {
+        'nombreMarca': 'Princesa de Gales',
+        'subtitulo': 'ESTETICA INTEGRAL',
+        'logoAsset': logoAsset,
+      },
+      'actualizadoEn': FieldValue.serverTimestamp(),
+      'creadoEn': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    await _db.collection('usuarios').doc(userDocId).set({
+      'sede': sedeNombre,
+      'sedeId': sedeId,
+      'dashboardWeb': sedeId,
+      'actualizadoEn': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    return {
+      ...userData,
+      'sede': sedeNombre,
+      'sedeId': sedeId,
+      'dashboardWeb': sedeId,
+    };
+  }
+
+  Future<void> _crearDatosDemoSede({
+    required String sedeId,
+    required String sedeNombre,
+    required String correoDocente,
+    required String correoAdministrativo,
+    required String nombreDocente,
+    required String nombreAdministrativo,
+  }) async {
+    final docenteRef = _db.collection('usuarios').doc('demo_docente_$sedeId');
+    final administrativoRef = _db
+        .collection('usuarios')
+        .doc('demo_administrativo_$sedeId');
+
+    await docenteRef.set({
+      'nombre': nombreDocente,
+      'correo': correoDocente,
+      'password': 'demo1234',
+      'rol': 'Docente',
+      'tipo_horario': 'completo',
+      'horarios_asignados': ['TC_08_16'],
+      'sede': sedeNombre,
+      'sedeId': sedeId,
+      'dashboardWeb': sedeId,
+      'demo': true,
+      'creadoEn': FieldValue.serverTimestamp(),
+      'actualizadoEn': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    await administrativoRef.set({
+      'nombre': nombreAdministrativo,
+      'correo': correoAdministrativo,
+      'password': 'demo1234',
+      'rol': 'Administrativo',
+      'tipo_horario': 'administrativo',
+      'sede': sedeNombre,
+      'sedeId': sedeId,
+      'dashboardWeb': sedeId,
+      'demo': true,
+      'creadoEn': FieldValue.serverTimestamp(),
+      'actualizadoEn': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    await _db.collection('validaciones_sede').doc('demo_$sedeId').set({
+      'sede': sedeNombre,
+      'sedeId': sedeId,
+      'docenteDemoId': docenteRef.id,
+      'administrativoDemoId': administrativoRef.id,
+      'descripcion':
+          'Documento de validacion para comprobar filtros de docentes y administrativos por sede.',
+      'actualizadoEn': FieldValue.serverTimestamp(),
+      'creadoEn': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Future<void> _crearUsuariosDemoApp({
+    required String sedeId,
+    required String sedeNombre,
+    required List<Map<String, Object>> usuariosDemo,
+  }) async {
+    for (final usuario in usuariosDemo) {
+      await _db.collection('usuarios').doc(usuario['docId'].toString()).set({
+        'nombre': usuario['nombre'],
+        'correo': usuario['correo'],
+        'password': usuario['password'],
+        'rol': usuario['rol'],
+        'tipo_horario': usuario['tipo_horario'],
+        'horarios_asignados': usuario['horarios_asignados'],
+        'telefono': usuario['telefono'],
+        'sede': sedeNombre,
+        'sedeId': sedeId,
+        'dashboardWeb': sedeId,
+        'especialidad': usuario['especialidad'] ??
+            (usuario['rol'] == 'Docente'
+                ? 'Estetica Integral'
+                : 'Administracion'),
+        'demo': true,
+        'actualizadoEn': FieldValue.serverTimestamp(),
+        'creadoEn': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    }
+
+    await _db.collection('validaciones_sede').doc('app_demo_$sedeId').set({
+      'sede': sedeNombre,
+      'sedeId': sedeId,
+      'usuariosDemo': usuariosDemo.map((e) => e['docId']).toList(),
+      'descripcion': 'Usuarios demo para la aplicacion movil de $sedeNombre.',
+      'actualizadoEn': FieldValue.serverTimestamp(),
+      'creadoEn': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Future<Map<String, dynamic>> activarSedePrincesaGalesNorte({
+    required Map<String, dynamic> userData,
+  }) async {
+    return _activarSedeEspecial(
+      userData: userData,
+      sedeId: 'princesa_gales_norte',
+      sedeNombre: 'Princesa de Gales Norte',
+      logoAsset: 'assets/images/logo_galesnorte.png',
+      colores: const {
+        'primary': '#6D2745',
+        'secondary': '#8A3557',
+        'accent': '#F4E9EC',
+        'text': '#FFF7F8',
+      },
+    );
+  }
+
+  Future<Map<String, dynamic>> activarSedePrincesaGalesCentro({
+    required Map<String, dynamic> userData,
+  }) async {
+    return _activarSedeEspecial(
+      userData: userData,
+      sedeId: 'princesa_gales_centro',
+      sedeNombre: 'Princesa de Gales Centro',
+      logoAsset: 'assets/images/logo_galescentro.png',
+      colores: const {
+        'primary': '#9C4F73',
+        'secondary': '#B6688A',
+        'accent': '#F7EAF0',
+        'text': '#FFF8FB',
+      },
+    );
+  }
+
+  Future<Map<String, dynamic>> activarSedeInstitutoCreSer({
+    required Map<String, dynamic> userData,
+  }) async {
+    return _activarSedeEspecial(
+      userData: userData,
+      sedeId: 'instituto_cre_ser',
+      sedeNombre: 'Instituto Cre Ser',
+      logoAsset: 'assets/images/logo_cre_ser.jpeg',
+      colores: const {
+        'primary': '#2167AE',
+        'secondary': '#4B93D9',
+        'accent': '#EAF4FF',
+        'text': '#F8FBFF',
+      },
+    );
+  }
+
+  Future<void> crearDatosDemoSedeNorte() async {
+    await _crearDatosDemoSede(
+      sedeId: 'princesa_gales_norte',
+      sedeNombre: 'Princesa de Gales Norte',
+      correoDocente: 'demo.docente.norte@intesud.test',
+      correoAdministrativo: 'demo.administrativo.norte@intesud.test',
+      nombreDocente: 'Docente Demo Norte',
+      nombreAdministrativo: 'Administrativo Demo Norte',
+    );
+  }
+
+  Future<void> crearDatosDemoSedeCentro() async {
+    await _crearDatosDemoSede(
+      sedeId: 'princesa_gales_centro',
+      sedeNombre: 'Princesa de Gales Centro',
+      correoDocente: 'demo.docente.centro@intesud.test',
+      correoAdministrativo: 'demo.administrativo.centro@intesud.test',
+      nombreDocente: 'Docente Demo Centro',
+      nombreAdministrativo: 'Administrativo Demo Centro',
+    );
+  }
+
+  Future<void> crearDatosDemoSedeCreSer() async {
+    await _crearDatosDemoSede(
+      sedeId: 'instituto_cre_ser',
+      sedeNombre: 'Instituto Cre Ser',
+      correoDocente: 'demo.docente.creser@intesud.test',
+      correoAdministrativo: 'demo.administrativo.creser@intesud.test',
+      nombreDocente: 'Docente Demo Cre Ser',
+      nombreAdministrativo: 'Administrativo Demo Cre Ser',
+    );
+  }
+
+  Future<void> crearUsuariosDemoAppNorte() async {
+    await _crearUsuariosDemoApp(
+      sedeId: 'princesa_gales_norte',
+      sedeNombre: 'Princesa de Gales Norte',
+      usuariosDemo: const [
+      {
+        'docId': 'norte_docente_tp_01',
+        'nombre': 'Camila Andrade Norte',
+        'correo': 'camila.norte@princesadegales.app',
+        'password': 'norte1234',
+        'rol': 'Docente',
+        'tipo_horario': 'medio_tiempo',
+        'horarios_asignados': ['TP_08_10'],
+        'telefono': '0991001001',
+      },
+      {
+        'docId': 'norte_docente_tp_02',
+        'nombre': 'Valeria Mena Norte',
+        'correo': 'valeria.norte@princesadegales.app',
+        'password': 'norte1234',
+        'rol': 'Docente',
+        'tipo_horario': 'medio_tiempo',
+        'horarios_asignados': ['TP_10_12'],
+        'telefono': '0991001002',
+      },
+      {
+        'docId': 'norte_admin_tc_01',
+        'nombre': 'Daniela Paredes Norte',
+        'correo': 'daniela.admin@princesadegales.app',
+        'password': 'norte1234',
+        'rol': 'Administrativo',
+        'tipo_horario': 'completo',
+        'horarios_asignados': ['TC_08_16'],
+        'telefono': '0991001003',
+      },
+      {
+        'docId': 'norte_admin_tc_02',
+        'nombre': 'Paola Jaramillo Norte',
+        'correo': 'paola.admin@princesadegales.app',
+        'password': 'norte1234',
+        'rol': 'Administrativo',
+        'tipo_horario': 'completo',
+        'horarios_asignados': ['TC_08_16'],
+        'telefono': '0991001004',
+      },
+      ],
+    );
+  }
+
+  Future<void> crearUsuariosDemoAppCentro() async {
+    await _crearUsuariosDemoApp(
+      sedeId: 'princesa_gales_centro',
+      sedeNombre: 'Princesa de Gales Centro',
+      usuariosDemo: const [
+        {
+          'docId': 'centro_docente_tp_01',
+          'nombre': 'Andrea Cabrera Centro',
+          'correo': 'andrea.centro@princesadegales.app',
+          'password': 'centro1234',
+          'rol': 'Docente',
+          'tipo_horario': 'medio_tiempo',
+          'horarios_asignados': ['TP_08_10'],
+          'telefono': '0992001001',
+        },
+        {
+          'docId': 'centro_docente_tp_02',
+          'nombre': 'Melissa Vinueza Centro',
+          'correo': 'melissa.centro@princesadegales.app',
+          'password': 'centro1234',
+          'rol': 'Docente',
+          'tipo_horario': 'medio_tiempo',
+          'horarios_asignados': ['TP_10_12'],
+          'telefono': '0992001002',
+        },
+        {
+          'docId': 'centro_admin_tc_01',
+          'nombre': 'Karla Romero Centro',
+          'correo': 'karla.admin.centro@princesadegales.app',
+          'password': 'centro1234',
+          'rol': 'Administrativo',
+          'tipo_horario': 'completo',
+          'horarios_asignados': ['TC_08_16'],
+          'telefono': '0992001003',
+        },
+        {
+          'docId': 'centro_admin_tc_02',
+          'nombre': 'Monica Salazar Centro',
+          'correo': 'monica.admin.centro@princesadegales.app',
+          'password': 'centro1234',
+          'rol': 'Administrativo',
+          'tipo_horario': 'completo',
+          'horarios_asignados': ['TC_08_16'],
+          'telefono': '0992001004',
+        },
+      ],
+    );
+  }
+
+  Future<void> crearUsuariosDemoAppCreSer() async {
+    await _crearUsuariosDemoApp(
+      sedeId: 'instituto_cre_ser',
+      sedeNombre: 'Instituto Cre Ser',
+      usuariosDemo: const [
+        {
+          'docId': 'creser_docente_tp_01',
+          'nombre': 'Lucia Herrera Cre Ser',
+          'correo': 'lucia.creser@institutocreser.app',
+          'password': 'creser1234',
+          'rol': 'Docente',
+          'tipo_horario': 'medio_tiempo',
+          'horarios_asignados': ['TP_08_10'],
+          'telefono': '0993001001',
+        },
+        {
+          'docId': 'creser_docente_tp_02',
+          'nombre': 'Patricia Solis Cre Ser',
+          'correo': 'patricia.creser@institutocreser.app',
+          'password': 'creser1234',
+          'rol': 'Docente',
+          'tipo_horario': 'medio_tiempo',
+          'horarios_asignados': ['TP_10_12'],
+          'telefono': '0993001002',
+        },
+        {
+          'docId': 'creser_admin_tc_01',
+          'nombre': 'Veronica Montalvo Cre Ser',
+          'correo': 'veronica.admin@institutocreser.app',
+          'password': 'creser1234',
+          'rol': 'Administrativo',
+          'tipo_horario': 'completo',
+          'horarios_asignados': ['TC_08_16'],
+          'telefono': '0993001003',
+        },
+        {
+          'docId': 'creser_admin_tc_02',
+          'nombre': 'Diana Merino Cre Ser',
+          'correo': 'diana.admin@institutocreser.app',
+          'password': 'creser1234',
+          'rol': 'Administrativo',
+          'tipo_horario': 'completo',
+          'horarios_asignados': ['TC_08_16'],
+          'telefono': '0993001004',
+        },
+      ],
+    );
+  }
   // Marcación: Busca en la lista de la captura con VALIDACIÓN DE ESTADO
   Future<Map<String, String>> registrarMarcacion({
     required String nombreUsuario,
@@ -330,6 +723,19 @@ class FirebaseService {
       throw Exception("Error al actualizar la solicitud: $e");
     }
   }
+Future<List<Solicitud>> obtenerMisSolicitdes(String nombre) async {
+  try {
+    QuerySnapshot snapshot = await _db.collection('solicitudes')
+        .where('colaborador', isEqualTo: nombre)
+        .get();
+
+    return snapshot.docs.map((doc) => 
+      Solicitud.fromMap(doc.id, doc.data() as Map<String, dynamic>)).toList();
+  } catch (e) {
+    print("Error al obtener solicitudes: $e");
+    return [];
+  }
+}
 
 // Obtener estado actual del almuerzo
   Future<String> obtenerEstadoAlmuerzoHoy(String correo) async {

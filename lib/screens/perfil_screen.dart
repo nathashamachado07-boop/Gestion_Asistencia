@@ -1,23 +1,34 @@
-import 'dart:ui'; // Necesario para ImageFilter
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
+
+import '../models/app_branding.dart';
 import '../services/firebase_service.dart';
-import 'login_screen.dart';
 
 class PerfilScreen extends StatefulWidget {
-  final String correoUsuario;
+  const PerfilScreen({
+    super.key,
+    required this.correoUsuario,
+    this.isSedeNorte = false,
+    this.sedeId,
+  });
 
-  const PerfilScreen({super.key, required this.correoUsuario});
+  final String correoUsuario;
+  final bool isSedeNorte;
+  final String? sedeId;
 
   @override
   State<PerfilScreen> createState() => _PerfilScreenState();
 }
 
 class _PerfilScreenState extends State<PerfilScreen> {
-  static const Color _istsColor = Color(0xFF467879);
-  static const Color _fondoSuave = Color(0xFFF2F5F5);
-
   late Future<Map<String, dynamic>?> _perfilFuture;
   final FirebaseService _service = FirebaseService();
+
+  AppBranding get _branding => AppBranding.fromLegacy(
+        isSedeNorte: widget.isSedeNorte,
+        sedeId: widget.sedeId,
+      );
 
   @override
   void initState() {
@@ -28,23 +39,28 @@ class _PerfilScreenState extends State<PerfilScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _fondoSuave,
+      backgroundColor: _branding.surface,
       body: FutureBuilder<Map<String, dynamic>?>(
         future: _perfilFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator(color: _istsColor));
+            return Center(
+              child: CircularProgressIndicator(color: _branding.primary),
+            );
           }
 
           if (snapshot.hasError) {
-            return const Center(child: Text("Ocurrió un error inesperado"));
+            return const Center(child: Text('Ocurrio un error inesperado'));
           }
 
           if (!snapshot.hasData || snapshot.data == null) {
-            return const Center(child: Text("No se pudo cargar la información"));
+            return const Center(
+              child: Text('No se pudo cargar la informacion'),
+            );
           }
 
           final datos = snapshot.data!;
+          final sede = (datos['sede'] ?? 'Matriz').toString();
 
           return CustomScrollView(
             physics: const BouncingScrollPhysics(),
@@ -52,12 +68,11 @@ class _PerfilScreenState extends State<PerfilScreen> {
               SliverToBoxAdapter(
                 child: Stack(
                   children: [
-                    // Fondo principal de la cabecera
                     Container(
-                      height: 300, // Aumentado ligeramente para mejor distribución
-                      decoration: const BoxDecoration(
-                        color: _istsColor,
-                        borderRadius: BorderRadius.only(
+                      height: 300,
+                      decoration: BoxDecoration(
+                        color: _branding.primary,
+                        borderRadius: const BorderRadius.only(
                           bottomLeft: Radius.circular(45),
                           bottomRight: Radius.circular(45),
                         ),
@@ -70,7 +85,7 @@ class _PerfilScreenState extends State<PerfilScreen> {
                             padding: EdgeInsets.symmetric(vertical: 15),
                             child: Center(
                               child: Text(
-                                "MI PERFIL",
+                                'MI PERFIL',
                                 style: TextStyle(
                                   color: Colors.white,
                                   fontWeight: FontWeight.w600,
@@ -81,7 +96,6 @@ class _PerfilScreenState extends State<PerfilScreen> {
                             ),
                           ),
                           const SizedBox(height: 10),
-                          // Avatar
                           Center(
                             child: Column(
                               children: [
@@ -91,31 +105,39 @@ class _PerfilScreenState extends State<PerfilScreen> {
                                     color: Colors.white24,
                                     shape: BoxShape.circle,
                                   ),
-                                  child: const CircleAvatar(
+                                  child: CircleAvatar(
                                     radius: 50,
                                     backgroundColor: Colors.white,
-                                    child: Icon(Icons.person_outline_rounded,
-                                        size: 60, color: _istsColor),
+                                    child: Icon(
+                                      Icons.person_outline_rounded,
+                                      size: 60,
+                                      color: _branding.primary,
+                                    ),
                                   ),
                                 ),
                                 const SizedBox(height: 15),
                                 Text(
-                                  datos['nombre'] ?? "Usuario ISTS",
+                                  datos['nombre'] ?? 'Usuario',
                                   textAlign: TextAlign.center,
                                   style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 22,
-                                      fontWeight: FontWeight.bold),
+                                    color: Colors.white,
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
-                                const SizedBox(height: 12), // Espacio extra antes del rol
-                                
-                                // --- EFECTO VIDRIO ESMERILADO (Glassmorphism) ---
+                                const SizedBox(height: 12),
                                 ClipRRect(
                                   borderRadius: BorderRadius.circular(20),
                                   child: BackdropFilter(
-                                    filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                                    filter: ImageFilter.blur(
+                                      sigmaX: 10,
+                                      sigmaY: 10,
+                                    ),
                                     child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 20,
+                                        vertical: 8,
+                                      ),
                                       decoration: BoxDecoration(
                                         color: Colors.white.withValues(alpha: 0.2),
                                         borderRadius: BorderRadius.circular(20),
@@ -125,12 +147,13 @@ class _PerfilScreenState extends State<PerfilScreen> {
                                         ),
                                       ),
                                       child: Text(
-                                        datos['rol']?.toUpperCase() ?? "SIN ROL",
+                                        datos['rol']?.toUpperCase() ?? 'SIN ROL',
                                         style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.bold,
-                                            letterSpacing: 1.1),
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                          letterSpacing: 1.1,
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -144,69 +167,89 @@ class _PerfilScreenState extends State<PerfilScreen> {
                   ],
                 ),
               ),
-
-              // Cuerpo de información
               SliverPadding(
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 25),
                 sliver: SliverList(
                   delegate: SliverChildListDelegate([
-                    const Text(
-                      "Información Académica",
+                    Text(
+                      'Informacion Academica',
                       style: TextStyle(
-                          color: _istsColor,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16),
+                        color: _branding.primary,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
                     ),
                     const SizedBox(height: 20),
-                    _buildInfoCard(context, Icons.business_center_outlined, "ÁREA",
-                        datos['especialidad'] ?? "No asignada"),
+                    _buildInfoCard(
+                      Icons.business_center_outlined,
+                      'AREA',
+                      datos['especialidad'] ?? 'No asignada',
+                    ),
                     const SizedBox(height: 14),
-                    _buildInfoCard(context, Icons.email_outlined,
-                        "Correo Institucional", datos['correo'] ?? widget.correoUsuario),
+                    _buildInfoCard(
+                      Icons.email_outlined,
+                      'Correo Institucional',
+                      datos['correo'] ?? widget.correoUsuario,
+                    ),
                     const SizedBox(height: 14),
                     Row(
                       children: [
                         Expanded(
-                            child: _buildInfoCard(context, Icons.smartphone_rounded,
-                                "Teléfono", datos['telefono'] ?? "N/A")),
+                          child: _buildInfoCard(
+                            Icons.smartphone_rounded,
+                            'Telefono',
+                            datos['telefono'] ?? 'N/A',
+                          ),
+                        ),
                         const SizedBox(width: 14),
                         Expanded(
-                            child: _buildInfoCard(context, Icons.location_on_outlined,
-                                "Sede", "Matriz")),
+                          child: _buildInfoCard(
+                            Icons.location_on_outlined,
+                            'Sede',
+                            sede,
+                          ),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 40),
-                    
-                    // Botón de Cerrar Sesión
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 10),
                       child: OutlinedButton(
                         onPressed: () {
-                          Navigator.pushAndRemoveUntil(
+                          Navigator.pushNamedAndRemoveUntil(
                             context,
-                            MaterialPageRoute(builder: (context) => const LoginScreen()),
+                            '/login',
                             (route) => false,
                           );
                         },
                         style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: Colors.redAccent, width: 1.5),
+                          side: const BorderSide(
+                            color: Colors.redAccent,
+                            width: 1.5,
+                          ),
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(15)),
+                            borderRadius: BorderRadius.circular(15),
+                          ),
                           backgroundColor: Colors.redAccent.withValues(alpha: 0.02),
                         ),
                         child: const Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.logout_rounded, color: Colors.redAccent, size: 20),
+                            Icon(
+                              Icons.logout_rounded,
+                              color: Colors.redAccent,
+                              size: 20,
+                            ),
                             SizedBox(width: 12),
                             Text(
-                              "CERRAR SESIÓN",
+                              'CERRAR SESION',
                               style: TextStyle(
-                                  color: Colors.redAccent,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 13,
-                                  letterSpacing: 0.8),
+                                color: Colors.redAccent,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 13,
+                                letterSpacing: 0.8,
+                              ),
                             ),
                           ],
                         ),
@@ -223,8 +266,7 @@ class _PerfilScreenState extends State<PerfilScreen> {
     );
   }
 
-  // --- ICONOS CON TOQUE NEUMÓRFICO ---
-  Widget _buildInfoCard(BuildContext context, IconData icono, String label, String valor) {
+  Widget _buildInfoCard(IconData icono, String label, String valor) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -240,26 +282,25 @@ class _PerfilScreenState extends State<PerfilScreen> {
       ),
       child: Row(
         children: [
-          // Contenedor del icono con sombras duales (Neumorfismo suave)
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: _fondoSuave,
+              color: _branding.surface,
               borderRadius: BorderRadius.circular(15),
               boxShadow: [
-                BoxShadow(
+                const BoxShadow(
                   color: Colors.white,
-                  offset: const Offset(-2, -2),
+                  offset: Offset(-2, -2),
                   blurRadius: 4,
                 ),
                 BoxShadow(
-                  color: _istsColor.withValues(alpha: 0.15),
+                  color: _branding.primary.withValues(alpha: 0.15),
                   offset: const Offset(2, 2),
                   blurRadius: 4,
                 ),
               ],
             ),
-            child: Icon(icono, color: _istsColor, size: 22),
+            child: Icon(icono, color: _branding.primary, size: 22),
           ),
           const SizedBox(width: 15),
           Expanded(
@@ -269,18 +310,20 @@ class _PerfilScreenState extends State<PerfilScreen> {
                 Text(
                   label,
                   style: TextStyle(
-                      fontSize: 11,
-                      color: Colors.grey[500],
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 0.5),
+                    fontSize: 11,
+                    color: Colors.grey[500],
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   valor,
                   style: const TextStyle(
-                      fontSize: 14,
-                      color: Color(0xFF2D3E3E),
-                      fontWeight: FontWeight.w700),
+                    fontSize: 14,
+                    color: Color(0xFF2D3E3E),
+                    fontWeight: FontWeight.w700,
+                  ),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),

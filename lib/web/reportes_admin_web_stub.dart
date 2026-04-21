@@ -1,14 +1,21 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
-// Definimos la función vacía para que Android no de error de compilación
-void descargarArchivoWeb(List<int> bytes, String nombre) {
-  // No hace nada en dispositivos móviles
-}
-
+// Esta clase es un cascarón vacío para que Android no falle.
+// Solo se mostrará si por error alguien llega aquí en móvil.
 class ReportesAdminWeb extends StatelessWidget {
-  const ReportesAdminWeb({super.key});
+  const ReportesAdminWeb({
+    super.key,
+    this.isSedeNorte = false,
+    this.sedeId,
+  });
+
+  final bool isSedeNorte;
+  final String? sedeId;
 
   @override
-  Widget build(BuildContext context) => const SizedBox();
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: Center(child: Text("Panel no disponible en móvil")),
+    );
+  }
 }

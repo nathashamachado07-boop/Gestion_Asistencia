@@ -84,6 +84,12 @@ flutter:
   assets:
   - assets/images/logo_intesud.png
   - assets/images/logo_intesud1.png
+  - assets/images/logo_intesud2.png
+  - assets/images/logo_intesud3.png
+  - assets/images/logo_galesnorte.png
+  - assets/images/logo_galescentro.png
+  - assets/images/logo_cre_ser.jpeg
+  - assets/images/imagen_fondo.png
   #   - images/a_dot_burr.jpeg
   #   - images/a_dot_ham.jpeg
 

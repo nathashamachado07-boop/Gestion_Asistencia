@@ -3,20 +3,38 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../config/app_config.dart';
+import '../models/app_branding.dart';
 
-class DashboardAdminWeb extends StatelessWidget {
-  const DashboardAdminWeb({super.key});
+class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
+  const DashboardPrincesaGalesNorteWeb({
+    super.key,
+    required this.sedeId,
+    required this.branding,
+    this.nombreUsuario = 'Recursos Humanos',
+    this.showBrandLogo = false,
+    this.onCreateDemoData,
+    this.isCreatingDemoData = false,
+  });
 
-  static const Color _primary = Color(0xFF467879);
-  static const Color _secondary = Color(0xFF6FA1A0);
-  static const Color _primaryDark = Color(0xFF274B4C);
-  static const Color _accent = Color(0xFFD8E9E5);
-  static const Color _soft = Color(0xFFF3F8F7);
-  static const Color _card = Color(0xFFFFFFFF);
-  static const Color _ink = Color(0xFF243133);
-  static const Color _muted = Color(0xFF6D8486);
+  final String sedeId;
+  final AppBranding branding;
+  final String nombreUsuario;
+  final bool showBrandLogo;
+  final Future<void> Function()? onCreateDemoData;
+  final bool isCreatingDemoData;
+
+  Color get _primary => branding.primary;
+  Color get _secondary => branding.primary.withOpacity(0.82);
+  Color get _accent => branding.softAccent;
+  Color get _soft => branding.surface;
+  Color get _card => Colors.white.withOpacity(0.95);
+  static const Color _ink = Color(0xFF3D1D2E);
+  static const Color _muted = Color(0xFF8A6676);
   static const Color _success = Color(0xFF3FA36C);
   static const Color _danger = Color(0xFFD96557);
+  String get _sedeNombre => SedeAccess.displayNameForId(sedeId);
+  bool get _isCentro => sedeId == SedeAccess.sedeCentroId;
+  bool get _isCreSer => sedeId == SedeAccess.sedeCreSerId;
 
   @override
   Widget build(BuildContext context) {
@@ -25,7 +43,83 @@ class DashboardAdminWeb extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildHero(),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(28),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [_primary, _secondary],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(28),
+              boxShadow: [
+                BoxShadow(
+                  color: _primary.withOpacity(0.18),
+                  blurRadius: 26,
+                  offset: const Offset(0, 14),
+                ),
+              ],
+            ),
+            child: Wrap(
+              alignment: WrapAlignment.start,
+              runSpacing: 18,
+              children: [
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 680),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _accent.withOpacity(0.18),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: Colors.white24),
+                        ),
+                        child: const Text(
+                          'Sede activa',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      Text(
+                        _sedeNombre,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 34,
+                          fontWeight: FontWeight.w800,
+                          height: 1.05,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        'Interfaz institucional personalizada para RRHH. '
+                        '$nombreUsuario esta gestionando esta sede desde el mismo acceso principal.',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.9),
+                          fontSize: 14,
+                          height: 1.5,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (onCreateDemoData != null) ...[
+            const SizedBox(height: 18),
+            _buildDemoAccessBanner(),
+          ],
           const SizedBox(height: 24),
           Wrap(
             spacing: 18,
@@ -35,10 +129,11 @@ class DashboardAdminWeb extends StatelessWidget {
                 title: 'Personal registrado',
                 icon: Icons.groups_2_outlined,
                 color: _primary,
-                stream: FirebaseFirestore.instance.collection('usuarios').snapshots(),
+                stream: FirebaseFirestore.instance
+                    .collection('usuarios')
+                    .snapshots(),
                 shouldCount: (data) =>
-                    SedeAccess.matchesSede(data, SedeAccess.matrizId) &&
-                    _isTrackedStaff(data),
+                    SedeAccess.matchesSede(data, sedeId) && _isTrackedStaff(data),
               ),
               _buildAttendanceCard(
                 title: 'Asistencias de hoy',
@@ -101,75 +196,223 @@ class DashboardAdminWeb extends StatelessWidget {
     );
   }
 
-  Widget _buildHero() {
+  Widget _buildBrandPanel() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: double.infinity,
+            constraints: const BoxConstraints(maxHeight: 150),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [branding.primaryDark, branding.primary],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: showBrandLogo
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(24),
+                    child: Padding(
+                      padding: EdgeInsets.all(_isCentro ? 2 : (_isCreSer ? 6 : 10)),
+                      child: Image.asset(
+                        branding.logoHeader,
+                        fit: BoxFit.contain,
+                        alignment: Alignment.center,
+                        scale: _isCentro ? 0.5 : (_isCreSer ? 0.66 : 0.78),
+                        errorBuilder: (context, error, stackTrace) =>
+                            _buildLogoFallback(),
+                      ),
+                    ),
+                  )
+                : _buildLogoFallback(),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Dashboard por sede',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Colores, logo e identidad de ${branding.displayName} aplicados solo a ${_sedeNombre.toLowerCase()}.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 11,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDemoAccessBanner() {
+    final demoAccess = switch (sedeId) {
+      SedeAccess.sedeCentroId => (
+          docente: 'andrea.centro@princesadegales.app',
+          administrativo: 'karla.admin.centro@princesadegales.app',
+          password: 'centro1234',
+        ),
+      SedeAccess.sedeCreSerId => (
+          docente: 'lucia.creser@institutocreser.app',
+          administrativo: 'veronica.admin@institutocreser.app',
+          password: 'creser1234',
+        ),
+      _ => (
+          docente: 'camila.norte@princesadegales.app',
+          administrativo: 'daniela.admin@princesadegales.app',
+          password: 'norte1234',
+        ),
+    };
+
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(28),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [_primaryDark, _primary, _secondary],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(28),
+        color: _card,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _primary.withOpacity(0.16)),
         boxShadow: [
           BoxShadow(
-            color: _primary.withOpacity(0.18),
-            blurRadius: 26,
-            offset: const Offset(0, 14),
+            color: _primary.withOpacity(0.08),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
           ),
         ],
       ),
       child: Wrap(
-        alignment: WrapAlignment.start,
-        runSpacing: 18,
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        runSpacing: 12,
         children: [
           ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 680),
+            constraints: const BoxConstraints(maxWidth: 760),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.14),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: Colors.white24),
-                  ),
-                  child: const Text(
-                    'Matriz activa',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                const Text(
-                  'Panel de control INTESUD',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 34,
-                    fontWeight: FontWeight.w800,
-                    height: 1.05,
-                  ),
-                ),
-                const SizedBox(height: 10),
                 Text(
-                  'Interfaz institucional personalizada para RRHH. Recursos Humanos esta gestionando la sede principal desde el mismo acceso central.',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.9),
-                    fontSize: 14,
+                  'Credenciales demo para $_sedeNombre',
+                  style: const TextStyle(
+                    color: _ink,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Docente: ${demoAccess.docente}  |  Administrativo: ${demoAccess.administrativo}  |  Clave: ${demoAccess.password}',
+                  style: const TextStyle(
+                    color: _muted,
+                    fontSize: 13,
                     height: 1.5,
-                    fontWeight: FontWeight.w500,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],
             ),
+          ),
+          FilledButton.icon(
+            onPressed: isCreatingDemoData ? null : onCreateDemoData,
+            style: FilledButton.styleFrom(
+              backgroundColor: _primary,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+            icon: isCreatingDemoData
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  )
+                : const Icon(Icons.person_add_alt_1_rounded),
+            label: Text(
+              isCreatingDemoData
+                  ? 'Creando credenciales...'
+                  : 'Crear credenciales demo',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLogoFallback() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Positioned(
+            top: 12,
+            right: 18,
+            child: Icon(
+              Icons.auto_awesome,
+              size: 16,
+              color: Colors.white70,
+            ),
+          ),
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                branding.isPrincesaDeGales
+                    ? Icons.spa_outlined
+                    : Icons.school_outlined,
+                size: 50,
+                color: Colors.white,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                branding.displayName,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w500,
+                  height: 1.1,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                branding.subtitle.toUpperCase(),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.6,
+                ),
+              ),
+              const SizedBox(height: 3),
+              const Text(
+                'Comprometidos con la Excelencia',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 7,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -351,12 +594,12 @@ class DashboardAdminWeb extends StatelessWidget {
         final docs = snapshot.data?.docs ?? const [];
         final docentes = docs.where((doc) {
           final data = doc.data() as Map<String, dynamic>;
-          return SedeAccess.matchesSede(data, SedeAccess.matrizId) &&
+          return SedeAccess.matchesSede(data, sedeId) &&
               _matchesRole(data, 'Docente');
         }).length;
         final administrativos = docs.where((doc) {
           final data = doc.data() as Map<String, dynamic>;
-          return SedeAccess.matchesSede(data, SedeAccess.matrizId) &&
+          return SedeAccess.matchesSede(data, sedeId) &&
               _matchesRole(data, 'Administrativo');
         }).length;
         final total = docentes + administrativos;
@@ -367,7 +610,7 @@ class DashboardAdminWeb extends StatelessWidget {
           decoration: BoxDecoration(
             color: _card,
             borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: _accent.withOpacity(0.78)),
+            border: Border.all(color: const Color(0xFFF0D8E2)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -381,8 +624,8 @@ class DashboardAdminWeb extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 8),
-              const Text(
-                'Resumen rapido del personal registrado en Matriz.',
+              Text(
+                'Resumen rapido del personal registrado en $_sedeNombre.',
                 style: TextStyle(
                   color: _muted,
                   fontSize: 14,
@@ -411,7 +654,7 @@ class DashboardAdminWeb extends StatelessWidget {
                     'Total',
                     '$total',
                     Icons.groups_2_outlined,
-                    const Color(0xFF7DA49C),
+                    _accent,
                   ),
                 ],
               ),
@@ -426,7 +669,7 @@ class DashboardAdminWeb extends StatelessWidget {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance.collection('usuarios').snapshots(),
       builder: (context, usuariosSnapshot) {
-        final nombresPermitidos =
+          final nombresPermitidos =
             _buildAllowedNames(usuariosSnapshot.data?.docs ?? const []);
 
         return StreamBuilder<QuerySnapshot>(
@@ -441,12 +684,12 @@ class DashboardAdminWeb extends StatelessWidget {
                   _normalize(data['estado']) == 'atraso';
             }).toList()
               ..sort((a, b) {
-                final fechaA =
-                    ((a.data() as Map<String, dynamic>)['fecha'] as Timestamp?)
-                        ?.toDate();
-                final fechaB =
-                    ((b.data() as Map<String, dynamic>)['fecha'] as Timestamp?)
-                        ?.toDate();
+                final fechaA = ((a.data() as Map<String, dynamic>)['fecha']
+                        as Timestamp?)
+                    ?.toDate();
+                final fechaB = ((b.data() as Map<String, dynamic>)['fecha']
+                        as Timestamp?)
+                    ?.toDate();
                 return (fechaB ?? DateTime(2000)).compareTo(
                   fechaA ?? DateTime(2000),
                 );
@@ -460,7 +703,7 @@ class DashboardAdminWeb extends StatelessWidget {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: _accent.withOpacity(0.45)),
+                border: Border.all(color: _accent.withOpacity(0.35)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -475,7 +718,7 @@ class DashboardAdminWeb extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Ultimos ${recientes.length} registros con atraso detectados en matriz.',
+                    'Ultimos ${recientes.length} registros con atraso detectados en ${_sedeNombre.toLowerCase()}.',
                     style: const TextStyle(
                       color: _muted,
                       fontSize: 13,
@@ -493,7 +736,7 @@ class DashboardAdminWeb extends StatelessWidget {
                         borderRadius: BorderRadius.circular(18),
                       ),
                       child: const Text(
-                        'No hay atrasos registrados para matriz por el momento.',
+                        'No hay atrasos registrados para esta sede por el momento.',
                         style: TextStyle(
                           color: _muted,
                           fontWeight: FontWeight.w600,
@@ -510,7 +753,7 @@ class DashboardAdminWeb extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: _soft,
                           borderRadius: BorderRadius.circular(18),
-                          border: Border.all(color: _accent.withOpacity(0.25)),
+                          border: Border.all(color: _accent.withOpacity(0.22)),
                         ),
                         child: Row(
                           children: [
@@ -618,9 +861,7 @@ class DashboardAdminWeb extends StatelessWidget {
   Set<String> _buildAllowedNames(List<QueryDocumentSnapshot> docs) {
     return docs
         .map((doc) => doc.data() as Map<String, dynamic>)
-        .where((data) =>
-            SedeAccess.matchesSede(data, SedeAccess.matrizId) &&
-            _isTrackedStaff(data))
+        .where((data) => SedeAccess.matchesSede(data, sedeId) && _isTrackedStaff(data))
         .map((data) => (data['nombre'] ?? '').toString().trim())
         .where((nombre) => nombre.isNotEmpty)
         .toSet();
@@ -654,4 +895,5 @@ class DashboardAdminWeb extends StatelessWidget {
     return (data['rol'] ?? '').toString().trim().toLowerCase() ==
         role.toLowerCase();
   }
+
 }
