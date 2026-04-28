@@ -22,37 +22,37 @@ class HistorialSolicitudesScreen extends StatefulWidget {
 
 class _HistorialSolicitudesScreenState extends State<HistorialSolicitudesScreen> {
   final FirebaseService service = FirebaseService();
+  late Future<List<Solicitud>> _solicitudesFuture;
   AppBranding get _branding => AppBranding.fromLegacy(
         isSedeNorte: widget.isSedeNorte,
         sedeId: widget.sedeId,
       );
-  
+
+  @override
+  void initState() {
+    super.initState();
+    _solicitudesFuture = _cargarSolicitudes();
+  }
+
+  Future<List<Solicitud>> _cargarSolicitudes() {
+    return service.obtenerMisSolicitdes(widget.nombreDocente);
+  }
+
   Future<void> _refrescarSolicitudes() async {
-    setState(() {}); 
+    final nuevaConsulta = _cargarSolicitudes();
+    setState(() {
+      _solicitudesFuture = nuevaConsulta;
+    });
+    await nuevaConsulta;
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.white,
       body: Stack(
         children: [
-          Container(decoration: BoxDecoration(color: _branding.background)),
-
-          // PATRÓN DE "S"
-          _buildPatronS(),
-
-          // LOGO GRANDE CENTRAL DE FONDO
-          Center(
-            child: Opacity(
-              opacity: 0.12,
-              child: Image.asset(
-                _branding.logoWatermark,
-                width: MediaQuery.of(context).size.width *
-                    _branding.mobileWatermarkWidthFactor,
-                fit: BoxFit.contain,
-              ),
-            ),
-          ),
+          Container(decoration: const BoxDecoration(color: Colors.white)),
 
           Column(
             children: [
@@ -64,14 +64,25 @@ class _HistorialSolicitudesScreenState extends State<HistorialSolicitudesScreen>
                   onRefresh: _refrescarSolicitudes,
                   color: _branding.primary,
                   child: FutureBuilder<List<Solicitud>>(
-                    future: service.obtenerMisSolicitdes(widget.nombreDocente), 
+                    future: _solicitudesFuture,
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting) {
-                    return Center(child: CircularProgressIndicator(color: _branding.primary));
+                        return ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          children: [
+                            const SizedBox(height: 120),
+                            Center(
+                              child: CircularProgressIndicator(
+                                color: _branding.primary,
+                              ),
+                            ),
+                          ],
+                        );
                       }
 
                       if (!snapshot.hasData || snapshot.data!.isEmpty) {
                         return ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
                           children: const [
                             SizedBox(height: 100),
                             Center(child: Text("No tienes solicitudes registradas.", style: TextStyle(fontWeight: FontWeight.w500))),
@@ -82,7 +93,9 @@ class _HistorialSolicitudesScreenState extends State<HistorialSolicitudesScreen>
                       final solicitudes = snapshot.data!;
 
                       return ListView.builder(
-                        physics: const BouncingScrollPhysics(),
+                        physics: const AlwaysScrollableScrollPhysics(
+                          parent: BouncingScrollPhysics(),
+                        ),
                         padding: const EdgeInsets.all(16),
                         itemCount: solicitudes.length,
                         itemBuilder: (context, index) {
@@ -96,9 +109,10 @@ class _HistorialSolicitudesScreenState extends State<HistorialSolicitudesScreen>
                           }
 
                           return Card(
-                            elevation: 3,
+                            elevation: 8,
                             margin: const EdgeInsets.only(bottom: 12),
-                            color: Colors.white.withOpacity(0.88),
+                            color: Colors.white,
+                            shadowColor: _branding.primary.withOpacity(0.2),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                             child: ListTile(
                               leading: CircleAvatar(

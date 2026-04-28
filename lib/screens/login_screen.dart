@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../config/app_config.dart';
 import '../models/app_branding.dart';
 import '../services/firebase_service.dart';
+import '../services/push_notification_service.dart';
 import '../web/admin_layout.dart';
 import 'registro_asistencia_screen.dart';
 import 'rrhh/nav_rrhh_screen.dart';
@@ -75,7 +76,14 @@ class _LoginScreenState extends State<LoginScreen>
     final rolLimpio = rolDB.trim().toUpperCase();
     final usuarioSedeId = SedeAccess.resolveSedeId(datosUsuario);
 
-    if (rolLimpio == 'RRHH') {
+    if (!kIsWeb) {
+      await PushNotificationService.instance.identifyUser(
+        correo: _correoController.text.trim(),
+        sedeId: usuarioSedeId,
+      );
+    }
+
+    if (UserRoleAccess.canUseAdminPanel(datosUsuario)) {
       if (kIsWeb) {
         Navigator.pushReplacement(
           context,
@@ -88,7 +96,9 @@ class _LoginScreenState extends State<LoginScreen>
       } else {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (context) => NavRRHHScreen()),
+          MaterialPageRoute(
+            builder: (context) => NavRRHHScreen(userData: datosUsuario),
+          ),
         );
       }
       return;
@@ -103,6 +113,13 @@ class _LoginScreenState extends State<LoginScreen>
       listaHorarios = List<String>.from(datosUsuario['horarios_asignados']);
     } else {
       listaHorarios = ['Sin horario asignado'];
+    }
+
+    if (!UserRoleAccess.canUseEmployeePortal(rolDB)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Este usuario no tiene acceso habilitado.')),
+      );
+      return;
     }
 
     Navigator.pushReplacement(

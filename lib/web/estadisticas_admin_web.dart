@@ -29,6 +29,12 @@ class EstadisticasAdminWeb extends StatelessWidget {
   }
 
   bool _matchesRole(Map<String, dynamic> data, String role) {
+    if (UserRoleAccess.isAdministrativeRole(role)) {
+      return UserRoleAccess.isAdministrativeRole(data['rol']);
+    }
+    if (UserRoleAccess.isTeacherRole(role)) {
+      return UserRoleAccess.isTeacherRole(data['rol']);
+    }
     return _normalize(data['rol']) == role.toLowerCase();
   }
 

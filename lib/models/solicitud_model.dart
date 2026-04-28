@@ -15,6 +15,14 @@ class Solicitud {
   int? diasDisponibles;    
   int? diasATomar;         
   DateTime? fechaSolicitud; 
+  int? anioVacaciones;
+  int? diasAcumulados;
+  int? saldoDias;
+  DateTime? fechaRetorno;
+  String? sedeId;
+  String? sede;
+  String? numFormulario;
+  String? colaboradorCorreo;
 
   Solicitud({
     required this.id,
@@ -29,6 +37,14 @@ class Solicitud {
     this.diasDisponibles,
     this.diasATomar,
     this.fechaSolicitud,
+    this.anioVacaciones,
+    this.diasAcumulados,
+    this.saldoDias,
+    this.fechaRetorno,
+    this.sedeId,
+    this.sede,
+    this.numFormulario,
+    this.colaboradorCorreo,
   });
 
   Map<String, dynamic> toMap() => {
@@ -43,6 +59,22 @@ class Solicitud {
     'diasDisponibles': diasDisponibles,
     'diasATomar': diasATomar,
     'fechaSolicitud': fechaSolicitud ?? DateTime.now(),
+    'fechaPermiso': tipo == 'Permiso' ? fechaInicio : null,
+    'horarioPermiso': horasPermiso,
+    'anioVacaciones':
+        tipo == 'Vacaciones' ? (anioVacaciones ?? fechaInicio.year) : null,
+    'diasAcumulados':
+        tipo == 'Vacaciones' ? (diasAcumulados ?? diasDisponibles) : null,
+    'saldoDias': tipo == 'Vacaciones'
+        ? (saldoDias ?? ((diasDisponibles ?? 0) - (diasATomar ?? 0)))
+        : null,
+    'fechaRetorno': tipo == 'Vacaciones'
+        ? (fechaRetorno ?? fechaFin.add(const Duration(days: 1)))
+        : null,
+    'sedeId': sedeId,
+    'sede': sede,
+    'numFormulario': numFormulario,
+    'colaboradorCorreo': colaboradorCorreo,
   };
 
   factory Solicitud.fromMap(String id, Map<String, dynamic> map) {
@@ -61,6 +93,16 @@ class Solicitud {
       fechaSolicitud: map['fechaSolicitud'] != null 
           ? (map['fechaSolicitud'] as Timestamp).toDate() 
           : null,
+      anioVacaciones: (map['anioVacaciones'] as num?)?.toInt(),
+      diasAcumulados: (map['diasAcumulados'] as num?)?.toInt(),
+      saldoDias: (map['saldoDias'] as num?)?.toInt(),
+      fechaRetorno: map['fechaRetorno'] != null
+          ? (map['fechaRetorno'] as Timestamp).toDate()
+          : null,
+      sedeId: map['sedeId'],
+      sede: map['sede'],
+      numFormulario: map['numFormulario']?.toString(),
+      colaboradorCorreo: map['colaboradorCorreo']?.toString(),
     );
   }
 }

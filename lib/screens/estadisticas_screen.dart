@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -33,6 +34,7 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
   final FirebaseService _service = FirebaseService();
   late Future<Map<String, int>> _estadisticasFuture;
   String _mesSeleccionado = 'Todos';
+  bool get _isWebLayout => kIsWeb;
 
   AppBranding get _branding => AppBranding.fromLegacy(
         isSedeNorte: widget.isSedeNorte,
@@ -181,41 +183,62 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _branding.background,
+      backgroundColor:
+          _isWebLayout ? Colors.white : _branding.background,
       body: Stack(
         children: [
-          Container(color: _branding.background),
-          Positioned.fill(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final double logoSize = _branding.mobilePatternLogoSize;
-                const double spacing = 75.0;
-                final int cols = (constraints.maxWidth / spacing).ceil() + 1;
-                final int rows = (constraints.maxHeight / spacing).ceil() + 1;
-                return Stack(
-                  children: List.generate(rows * cols, (index) {
-                    final int row = index ~/ cols;
-                    final int col = index % cols;
-                    final double offsetX = (row % 2 == 0) ? 0 : spacing / 2;
-                    return Positioned(
-                      left: col * spacing + offsetX - logoSize / 2,
-                      top: row * spacing - logoSize / 2,
-                      child: Opacity(
-                        opacity: 0.2,
-                        child: Image.asset(
-                          _branding.logoSmall,
-                          width: logoSize,
-                          height: logoSize,
-                          color: Colors.white,
-                          colorBlendMode: BlendMode.srcIn,
-                        ),
-                      ),
-                    );
-                  }),
-                );
-              },
-            ),
+          Container(
+            color: _isWebLayout ? Colors.white : _branding.background,
           ),
+          if (!_isWebLayout)
+            Positioned.fill(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final double logoSize = _branding.mobilePatternLogoSize;
+                  const double spacing = 75.0;
+                  final int cols = (constraints.maxWidth / spacing).ceil() + 1;
+                  final int rows = (constraints.maxHeight / spacing).ceil() + 1;
+
+                  return Stack(
+                    children: List.generate(rows * cols, (index) {
+                      final int row = index ~/ cols;
+                      final int col = index % cols;
+                      final double offsetX = (row % 2 == 0) ? 0 : spacing / 2;
+                      final double left = col * spacing + offsetX - logoSize / 2;
+                      final double top = row * spacing - logoSize / 2;
+
+                      return Positioned(
+                        left: left,
+                        top: top,
+                        child: Opacity(
+                          opacity: 0.13,
+                          child: Image.asset(
+                            _branding.logoSmall,
+                            width: logoSize,
+                            height: logoSize,
+                            fit: BoxFit.contain,
+                            color: Colors.white,
+                            colorBlendMode: BlendMode.srcIn,
+                          ),
+                        ),
+                      );
+                    }),
+                  );
+                },
+              ),
+            ),
+          if (!_isWebLayout)
+            Center(
+              child: Opacity(
+                opacity: 0.12,
+                child: Image.asset(
+                  _branding.logoWatermark,
+                  width: MediaQuery.of(context).size.width *
+                      _branding.mobileWatermarkWidthFactor,
+                  fit: BoxFit.contain,
+                ),
+              ),
+            ),
           Column(
             children: [
               Container(
@@ -283,8 +306,15 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 15),
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.9),
+                              color: Colors.white,
                               borderRadius: BorderRadius.circular(15),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.08),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
                             ),
                             child: DropdownButton<String>(
                               value: _mesSeleccionado,
@@ -341,6 +371,29 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
                               ),
                             ),
                           ),
+                          const SizedBox(height: 16),
+                          Wrap(
+                            spacing: 10,
+                            runSpacing: 10,
+                            alignment: WrapAlignment.center,
+                            children: [
+                              _buildLegendChip(
+                                'Puntuales',
+                                Colors.green,
+                                '${data['Puntual']}',
+                              ),
+                              _buildLegendChip(
+                                'Atrasos',
+                                Colors.orange,
+                                '${data['Atraso']}',
+                              ),
+                              _buildLegendChip(
+                                'Salida anticipada',
+                                Colors.redAccent,
+                                '${data['Salida Anticipada']}',
+                              ),
+                            ],
+                          ),
                           const SizedBox(height: 30),
                           SizedBox(
                             width: double.infinity,
@@ -380,6 +433,18 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
                             Icons.check_circle,
                             Colors.green,
                           ),
+                          _cardEstadistica(
+                            'Atrasos',
+                            '${data['Atraso']}',
+                            Icons.access_time_rounded,
+                            Colors.orange,
+                          ),
+                          _cardEstadistica(
+                            'Salidas Anticipadas',
+                            '${data['Salida Anticipada']}',
+                            Icons.logout_rounded,
+                            Colors.redAccent,
+                          ),
                         ],
                       ),
                     );
@@ -404,6 +469,53 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
     );
   }
 
+  Widget _buildLegendChip(String titulo, Color color, String valor) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: color.withOpacity(0.3)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            titulo,
+            style: const TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            valor,
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _cardEstadistica(
     String titulo,
     String valor,
@@ -413,13 +525,18 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 18),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.85),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(30),
         boxShadow: [
           BoxShadow(
-            color: _branding.primary.withOpacity(0.1),
-            blurRadius: 15,
-            offset: const Offset(0, 8),
+            color: _branding.primary.withOpacity(0.2),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 5),
           ),
         ],
       ),

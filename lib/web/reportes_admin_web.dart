@@ -66,6 +66,8 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
     'Todos',
     'A tiempo',
     'Atraso',
+    'Con permiso',
+    'Retraso con permiso',
     'Salida Anticipada',
     'Completada',
   ];
@@ -89,6 +91,12 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
   }
 
   bool _matchesRole(Map<String, dynamic> data, String role) {
+    if (UserRoleAccess.isAdministrativeRole(role)) {
+      return UserRoleAccess.isAdministrativeRole(data['rol']);
+    }
+    if (UserRoleAccess.isTeacherRole(role)) {
+      return UserRoleAccess.isTeacherRole(data['rol']);
+    }
     return _normalizarTexto(data['rol']) == role.toLowerCase();
   }
 
@@ -112,9 +120,170 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
         .toSet();
   }
 
-  List<QueryDocumentSnapshot> _filtrarRegistros(
+  bool _registroPerteneceASede(
+    Map<String, dynamic> data, {
+    Set<String>? nombresPermitidos,
+  }) {
+    final tieneSedeExplicita = _normalizarTexto(data['sedeId']).isNotEmpty ||
+        _normalizarTexto(data['sede']).isNotEmpty;
+
+    if (tieneSedeExplicita) {
+      return _matchesCurrentSede(data);
+    }
+
+    if (nombresPermitidos != null) {
+      final nombreMarcacion = (data['docente'] ?? '').toString().trim();
+      return nombresPermitidos.contains(nombreMarcacion);
+    }
+
+    return false;
+  }
+
+  Duration? _parseHora(String? value) {
+    if (value == null || value.trim().isEmpty) return null;
+    final match = RegExp(r'(\d{1,2}):(\d{2})').firstMatch(value);
+    if (match == null) return null;
+    final horas = int.tryParse(match.group(1)!);
+    final minutos = int.tryParse(match.group(2)!);
+    if (horas == null || minutos == null) return null;
+    return Duration(hours: horas, minutes: minutos);
+  }
+
+  ({Duration inicio, Duration fin})? _parseRangoPermiso(dynamic value) {
+    final texto = value?.toString() ?? '';
+    final matches = RegExp(r'(\d{1,2}):(\d{2})').allMatches(texto).toList();
+    if (matches.length < 2) return null;
+
+    final inicio = Duration(
+      hours: int.parse(matches[0].group(1)!),
+      minutes: int.parse(matches[0].group(2)!),
+    );
+    final fin = Duration(
+      hours: int.parse(matches[1].group(1)!),
+      minutes: int.parse(matches[1].group(2)!),
+    );
+    return (inicio: inicio, fin: fin);
+  }
+
+  bool _mismaFecha(dynamic fechaSolicitud, DateTime fechaRegistro) {
+    DateTime? fecha;
+
+    if (fechaSolicitud is Timestamp) {
+      fecha = fechaSolicitud.toDate();
+    } else if (fechaSolicitud is DateTime) {
+      fecha = fechaSolicitud;
+    } else if (fechaSolicitud != null) {
+      try {
+        fecha = DateTime.parse(fechaSolicitud.toString());
+      } catch (_) {
+        return false;
+      }
+    }
+
+    if (fecha == null) return false;
+
+    return fecha.year == fechaRegistro.year &&
+        fecha.month == fechaRegistro.month &&
+        fecha.day == fechaRegistro.day;
+  }
+
+  bool _permisoCubreMarcacion(
+    Map<String, dynamic> registro,
+    Map<String, dynamic> permiso,
+  ) {
+    final nombreRegistro = (registro['docente'] ?? '').toString().trim();
+    final nombrePermiso = (permiso['colaborador'] ?? '').toString().trim();
+    if (nombreRegistro.isEmpty || nombreRegistro != nombrePermiso) {
+      return false;
+    }
+
+    if (!_matchesCurrentSede(permiso)) {
+      return false;
+    }
+
+    final fechaRegistroRaw = registro['fecha'];
+    if (fechaRegistroRaw is! Timestamp) return false;
+    final fechaRegistro = fechaRegistroRaw.toDate();
+
+    final fechaPermiso =
+        permiso['fechaPermiso'] ?? permiso['fechaInicio'] ?? permiso['fechaSolicitud'];
+    if (!_mismaFecha(fechaPermiso, fechaRegistro)) {
+      return false;
+    }
+
+    final horaMarcada = _parseHora((registro['hora_marcada'] ?? '').toString());
+    final rango = _parseRangoPermiso(
+      permiso['horarioPermiso'] ?? permiso['horasPermiso'],
+    );
+
+    if (horaMarcada == null || rango == null) {
+      return true;
+    }
+
+    // La marcacion solo se considera "Con permiso" si cae dentro del
+    // rango exacto solicitado en el permiso aprobado.
+    return horaMarcada >= rango.inicio && horaMarcada <= rango.fin;
+  }
+
+  bool _permisoRelacionadoMismaFecha(
+    Map<String, dynamic> registro,
+    Map<String, dynamic> permiso,
+  ) {
+    final nombreRegistro = (registro['docente'] ?? '').toString().trim();
+    final nombrePermiso = (permiso['colaborador'] ?? '').toString().trim();
+    if (nombreRegistro.isEmpty || nombreRegistro != nombrePermiso) {
+      return false;
+    }
+
+    if (!_matchesCurrentSede(permiso)) {
+      return false;
+    }
+
+    final fechaRegistroRaw = registro['fecha'];
+    if (fechaRegistroRaw is! Timestamp) return false;
+    final fechaRegistro = fechaRegistroRaw.toDate();
+
+    final fechaPermiso =
+        permiso['fechaPermiso'] ?? permiso['fechaInicio'] ?? permiso['fechaSolicitud'];
+    return _mismaFecha(fechaPermiso, fechaRegistro);
+  }
+
+  String _resolverEstadoVisible(
+    Map<String, dynamic> data,
+    List<Map<String, dynamic>> permisosAprobados,
+  ) {
+    final estadoBase = (data['estado'] ?? '-').toString();
+    if (estadoBase != 'Atraso' && estadoBase != 'Salida Anticipada') {
+      return estadoBase;
+    }
+
+    final permisosRelacionados = permisosAprobados.where(
+      (permiso) => _permisoRelacionadoMismaFecha(data, permiso),
+    ).toList();
+
+    if (permisosRelacionados.isEmpty) {
+      return estadoBase;
+    }
+
+    final tienePermisoDentroDeHorario = permisosRelacionados.any(
+      (permiso) => _permisoCubreMarcacion(data, permiso),
+    );
+
+    if (tienePermisoDentroDeHorario) {
+      return 'Con permiso';
+    }
+
+    if (estadoBase == 'Atraso') {
+      return 'Retraso con permiso';
+    }
+
+    return estadoBase;
+  }
+
+  List<_ReporteAsistenciaItem> _filtrarRegistros(
     List<QueryDocumentSnapshot> docs, {
     Set<String>? nombresPermitidos,
+    List<Map<String, dynamic>> permisosAprobados = const [],
   }) {
     final int numMes = mesesMap[mesSeleccionado] ?? 4;
 
@@ -130,20 +299,29 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
 
       if (!coincidePeriodo) return false;
 
-      if (nombresPermitidos != null) {
-        final nombreMarcacion = (data['docente'] ?? '').toString().trim();
-        if (!nombresPermitidos.contains(nombreMarcacion)) {
-          return false;
-        }
+      if (!_registroPerteneceASede(
+        data,
+        nombresPermitidos: nombresPermitidos,
+      )) {
+        return false;
       }
+
+      final estadoVisible = _resolverEstadoVisible(data, permisosAprobados);
 
       if (estadoSeleccionado == 'Todos') return true;
 
-      return (data['estado'] ?? '').toString() == estadoSeleccionado;
+      return estadoVisible == estadoSeleccionado;
+    }).map((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+      return _ReporteAsistenciaItem(
+        doc: doc,
+        data: data,
+        estadoVisible: _resolverEstadoVisible(data, permisosAprobados),
+      );
     }).toList();
   }
 
-  Future<void> descargarReporte(List<QueryDocumentSnapshot> asistencias) async {
+  Future<void> descargarReporte(List<_ReporteAsistenciaItem> asistencias) async {
     final pdf = pw.Document();
 
     final ByteData image = await rootBundle.load(_logoAsset);
@@ -221,8 +399,8 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
             },
             data: <List<String>>[
               ['Docente', 'Fecha', 'Tipo', 'Estado', 'Hora'],
-              ...asistencias.map((doc) {
-                final data = doc.data() as Map<String, dynamic>;
+              ...asistencias.map((item) {
+                final data = item.data;
 
                 String fechaStr = '--/--/----';
                 if (data['fecha'] != null && data['fecha'] is Timestamp) {
@@ -234,7 +412,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
                   (data['docente'] ?? 'N/A').toString(),
                   fechaStr,
                   (data['tipo'] ?? '-').toString(),
-                  (data['estado'] ?? '-').toString(),
+                  item.estadoVisible,
                   (data['hora_marcada'] ?? '--:--').toString(),
                 ];
               }),
@@ -258,7 +436,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
     );
   }
 
-  Future<void> descargarExcel(List<QueryDocumentSnapshot> asistencias) async {
+  Future<void> descargarExcel(List<_ReporteAsistenciaItem> asistencias) async {
     final excel = xls.Excel.createExcel();
     final sheet = excel['Reporte'];
     excel.delete('Sheet1');
@@ -343,7 +521,8 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
 
     for (var i = 0; i < asistencias.length; i++) {
       final rowIndex = headerRow + i;
-      final data = asistencias[i].data() as Map<String, dynamic>;
+      final item = asistencias[i];
+      final data = item.data;
 
       String fechaStr = '--/--/----';
       if (data['fecha'] != null && data['fecha'] is Timestamp) {
@@ -355,7 +534,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
         (data['docente'] ?? 'N/A').toString(),
         fechaStr,
         (data['tipo'] ?? '-').toString(),
-        (data['estado'] ?? '-').toString(),
+        item.estadoVisible,
         (data['hora_marcada'] ?? '--:--').toString(),
       ];
 
@@ -435,14 +614,41 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
               final nombresPermitidos = _obtenerUsuariosPermitidosPorSede(
                 usuariosSnapshot.data!.docs,
               );
-              final registrosFiltrados = _filtrarRegistros(
-                asistenciasSnapshot.data!.docs,
-                nombresPermitidos: nombresPermitidos,
-              );
 
-              return _buildContenido(
-                registrosFiltrados,
-                mostrarAvisoSede: true,
+              return StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('solicitudes')
+                    .where('estado', isEqualTo: 'aprobado')
+                    .snapshots(),
+                builder: (context, solicitudesSnapshot) {
+                  if (solicitudesSnapshot.hasError) {
+                    return const Center(
+                      child: Text('Error al cargar permisos aprobados'),
+                    );
+                  }
+                  if (!solicitudesSnapshot.hasData) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+
+                  final permisosAprobados = solicitudesSnapshot.data!.docs
+                      .map((doc) => doc.data() as Map<String, dynamic>)
+                      .where((data) {
+                        return _matchesCurrentSede(data) &&
+                            _normalizarTexto(data['tipo']) == 'permiso';
+                      })
+                      .toList();
+
+                  final registrosFiltrados = _filtrarRegistros(
+                    asistenciasSnapshot.data!.docs,
+                    nombresPermitidos: nombresPermitidos,
+                    permisosAprobados: permisosAprobados,
+                  );
+
+                  return _buildContenido(
+                    registrosFiltrados,
+                    mostrarAvisoSede: true,
+                  );
+                },
               );
             },
           );
@@ -452,21 +658,25 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
   }
 
   Widget _buildContenido(
-    List<QueryDocumentSnapshot> registrosFiltrados, {
+    List<_ReporteAsistenciaItem> registrosFiltrados, {
     required bool mostrarAvisoSede,
   }) {
-    final atrasos = registrosFiltrados.where((doc) {
-      final data = doc.data() as Map<String, dynamic>;
-      return (data['estado'] ?? '').toString() == 'Atraso';
-    }).length;
-    final completos = registrosFiltrados.where((doc) {
-      final data = doc.data() as Map<String, dynamic>;
-      return (data['estado'] ?? '').toString() == 'Completada';
-    }).length;
-    final entradas = registrosFiltrados.where((doc) {
-      final data = doc.data() as Map<String, dynamic>;
-      return (data['tipo'] ?? '').toString() == 'ENTRADA';
-    }).length;
+    final atrasos = registrosFiltrados
+        .where((item) => item.estadoVisible == 'Atraso')
+        .length;
+    final conPermiso = registrosFiltrados
+        .where(
+          (item) =>
+              item.estadoVisible == 'Con permiso' ||
+              item.estadoVisible == 'Retraso con permiso',
+        )
+        .length;
+    final completos = registrosFiltrados
+        .where((item) => item.estadoVisible == 'Completada')
+        .length;
+    final entradas = registrosFiltrados
+        .where((item) => (item.data['tipo'] ?? '').toString() == 'ENTRADA')
+        .length;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -576,6 +786,8 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
                       _buildHeroMetric(label: 'Registros', value: '${registrosFiltrados.length}'),
                       const SizedBox(height: 10),
                       _buildHeroMetric(label: 'Atrasos', value: '$atrasos'),
+                      const SizedBox(height: 10),
+                      _buildHeroMetric(label: 'Con permiso', value: '$conPermiso'),
                       const SizedBox(height: 10),
                       _buildHeroMetric(label: 'Completadas', value: '$completos'),
                     ],
@@ -798,6 +1010,12 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
                     width: chipWidth,
                   ),
                   _buildSummaryChip(
+                    label: 'Con permiso',
+                    value: '$conPermiso',
+                    color: const Color(0xFF00897B),
+                    width: chipWidth,
+                  ),
+                  _buildSummaryChip(
                     label: 'Completadas',
                     value: '$completos',
                     color: const Color(0xFF2E7D32),
@@ -889,13 +1107,12 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
                                   _buildWideColumn('Estado', estadoWidth),
                                   _buildWideColumn('Hora', horaWidth),
                                 ],
-                                rows: registrosFiltrados.map((doc) {
-                                  final data = doc.data() as Map<String, dynamic>;
+                                rows: registrosFiltrados.map((item) {
+                                  final data = item.data;
                                   final fecha = data['fecha'] != null
                                       ? (data['fecha'] as Timestamp).toDate()
                                       : null;
-                                  final estado =
-                                      (data['estado'] ?? '-').toString();
+                                  final estado = item.estadoVisible;
 
                                   return DataRow(
                                     cells: [
@@ -1078,6 +1295,8 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
   Widget _buildStatusChip(String estado) {
     final color = switch (estado) {
       'Atraso' => const Color(0xFFD32F2F),
+      'Con permiso' => const Color(0xFF00897B),
+      'Retraso con permiso' => const Color(0xFF6D4C41),
       'Completada' => const Color(0xFF2E7D32),
       'A tiempo' => const Color(0xFF1565C0),
       'Salida Anticipada' => const Color(0xFFEF6C00),
@@ -1159,4 +1378,16 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
       ),
     );
   }
+}
+
+class _ReporteAsistenciaItem {
+  const _ReporteAsistenciaItem({
+    required this.doc,
+    required this.data,
+    required this.estadoVisible,
+  });
+
+  final QueryDocumentSnapshot doc;
+  final Map<String, dynamic> data;
+  final String estadoVisible;
 }

@@ -96,12 +96,12 @@ class AppBranding {
     background: Color(0xFFDCEBFA),
     surface: Color(0xFFF5FAFF),
     softAccent: Color(0xFFE6F0FB),
-    logoSmall: 'assets/images/logo_cre_ser.jpeg',
-    logoHeader: 'assets/images/logo_cre_ser.jpeg',
-    logoWatermark: 'assets/images/logo_cre_ser.jpeg',
-    logoPdf: 'assets/images/logo_cre_ser.jpeg',
-    displayName: 'Instituto Cre Ser',
-    sedeName: 'Instituto Cre Ser',
+    logoSmall: 'assets/images/logo_cre_ser.png',
+    logoHeader: 'assets/images/logo_cre_ser.png',
+    logoWatermark: 'assets/images/logo_cre_ser.png',
+    logoPdf: 'assets/images/logo_cre_ser.png',
+    displayName: 'Instituto Superior Tecnologico Cre Ser',
+    sedeName: 'Instituto Superior Tecnologico Cre Ser',
     subtitle: 'Formacion Integral',
   );
 

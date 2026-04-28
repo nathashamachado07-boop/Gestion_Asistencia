@@ -1,1 +1,28 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"tesis-intesud","appId":"1:18141359679:android:395b40a340b236dfcc528a","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"tesis-intesud","configurations":{"android":"1:18141359679:android:395b40a340b236dfcc528a","ios":"1:18141359679:ios:53910b469d41616ecc528a","macos":"1:18141359679:ios:53910b469d41616ecc528a","web":"1:18141359679:web:7cb520b73faa2c9acc528a","windows":"1:18141359679:web:c9814998c682e7dbcc528a"}}}}}}
+{
+  "functions": {
+    "source": "functions"
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "tesis-intesud",
+          "appId": "1:18141359679:android:395b40a340b236dfcc528a",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "tesis-intesud",
+          "configurations": {
+            "android": "1:18141359679:android:395b40a340b236dfcc528a",
+            "ios": "1:18141359679:ios:53910b469d41616ecc528a",
+            "macos": "1:18141359679:ios:53910b469d41616ecc528a",
+            "web": "1:18141359679:web:7cb520b73faa2c9acc528a",
+            "windows": "1:18141359679:web:c9814998c682e7dbcc528a"
+          }
+        }
+      }
+    }
+  }
+}

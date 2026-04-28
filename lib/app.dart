@@ -1,10 +1,12 @@
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'config/app_config.dart';
 import 'firebase_options.dart';
 import 'models/app_branding.dart';
+import 'services/push_notification_service.dart';
 import 'screens/login_screen.dart';
 import 'web/admin_layout.dart';
 import 'web/login_web.dart';
@@ -12,11 +14,19 @@ import 'web/login_web.dart';
 Future<void> bootstrapApp(AppConfig appConfig) async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  if (!kIsWeb) {
+    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+  }
+
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
   await initializeDateFormatting('es_ES', null);
+
+  if (!kIsWeb) {
+    await PushNotificationService.instance.initialize();
+  }
 
   runApp(AttendanceApp(appConfig: appConfig));
 }

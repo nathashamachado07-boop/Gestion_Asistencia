@@ -16,10 +16,12 @@ class GestionPersonalWeb extends StatefulWidget {
     super.key,
     this.isSedeNorte = false,
     this.sedeId,
+    this.userData,
   });
 
   final bool isSedeNorte;
   final String? sedeId;
+  final Map<String, dynamic>? userData;
 
   @override
   State<GestionPersonalWeb> createState() => _GestionPersonalWebState();
@@ -44,6 +46,12 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
   }
 
   bool _matchesRole(Map<String, dynamic> data, String role) {
+    if (UserRoleAccess.isAdministrativeRole(role)) {
+      return UserRoleAccess.isAdministrativeRole(data['rol']);
+    }
+    if (UserRoleAccess.isTeacherRole(role)) {
+      return UserRoleAccess.isTeacherRole(data['rol']);
+    }
     return _normalize(data['rol']) == role.toLowerCase();
   }
 
@@ -55,6 +63,18 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
   bool _matchesCurrentSede(Map<String, dynamic> data) {
     return SedeAccess.matchesSede(data, _resolvedSedeId);
   }
+
+  String get _correoActual =>
+      MatrizApprovalFlow.normalizeEmail(widget.userData?['correo']);
+
+  String get _nombreUsuarioActual =>
+      (widget.userData?['nombre'] ?? 'RRHH').toString().trim();
+
+  bool get _esRevisorPrimarioMatriz =>
+      MatrizApprovalFlow.isPrimaryReviewer(_correoActual);
+
+  bool get _esRevisorFinalMatriz =>
+      MatrizApprovalFlow.isFinalReviewer(_correoActual);
 
   String get _sedeLabel =>
       _resolvedSedeId == SedeAccess.matrizId
@@ -122,6 +142,120 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
     }).toList();
   }
 
+  bool _usaFlujoMatriz(Map<String, dynamic> data) {
+    if (!MatrizApprovalFlow.appliesToRequest(data)) {
+      return false;
+    }
+
+    final flujo = _normalize(data['flujoAprobacion']);
+    final estado = _normalize(data['estado']);
+    return flujo == MatrizApprovalFlow.flowId || estado == 'pendiente';
+  }
+
+  String _etapaSolicitud(Map<String, dynamic> data) {
+    final etapa = _normalize(data['etapaAprobacion']);
+    if (etapa.isNotEmpty) {
+      return etapa;
+    }
+
+    if (_usaFlujoMatriz(data) && _normalize(data['estado']) == 'pendiente') {
+      return MatrizApprovalFlow.stagePrimary;
+    }
+
+    return etapa;
+  }
+
+  bool _puedeResolverSolicitud(Map<String, dynamic> data) {
+    if (_normalize(data['estado']) != 'pendiente') {
+      return false;
+    }
+
+    if (!_usaFlujoMatriz(data)) {
+      return true;
+    }
+
+    final etapa = _etapaSolicitud(data);
+    if (etapa == MatrizApprovalFlow.stagePrimary) {
+      return _esRevisorPrimarioMatriz;
+    }
+    if (etapa == MatrizApprovalFlow.stageFinal) {
+      return _esRevisorFinalMatriz;
+    }
+
+    return false;
+  }
+
+  bool _mostrarComoPendienteParaUsuario(Map<String, dynamic> data) {
+    if (_normalize(data['estado']) != 'pendiente') {
+      return false;
+    }
+
+    if (!_usaFlujoMatriz(data)) {
+      return true;
+    }
+
+    final etapa = _etapaSolicitud(data);
+    if (etapa == MatrizApprovalFlow.stagePrimary) {
+      return _esRevisorPrimarioMatriz;
+    }
+    if (etapa == MatrizApprovalFlow.stageFinal) {
+      return _esRevisorFinalMatriz;
+    }
+
+    return false;
+  }
+
+  String _textoEtapaPendiente(Map<String, dynamic> data) {
+    if (!_usaFlujoMatriz(data) || _normalize(data['estado']) != 'pendiente') {
+      return 'Solicitud pendiente';
+    }
+
+    final etapa = _etapaSolicitud(data);
+    if (etapa == MatrizApprovalFlow.stagePrimary) {
+      return _esRevisorPrimarioMatriz
+          ? 'Pendiente de tu revision inicial'
+          : 'Pendiente de revision inicial RRHH';
+    }
+    if (etapa == MatrizApprovalFlow.stageFinal) {
+      return _esRevisorFinalMatriz
+          ? 'Pendiente de tu autorizacion final'
+          : 'Pendiente de autorizacion final';
+    }
+
+    return 'Solicitud pendiente';
+  }
+
+  String _labelBotonAprobar(Map<String, dynamic> data) {
+    if (_usaFlujoMatriz(data) &&
+        _etapaSolicitud(data) == MatrizApprovalFlow.stagePrimary) {
+      return 'Enviar a final';
+    }
+    if (_usaFlujoMatriz(data) &&
+        _etapaSolicitud(data) == MatrizApprovalFlow.stageFinal) {
+      return 'Aprobar final';
+    }
+    return 'Aprobar';
+  }
+
+  Future<void> _resolverSolicitud(String idDoc, String nuevoEstado) async {
+    try {
+      await _fs.actualizarEstadoSolicitud(
+        idDoc,
+        nuevoEstado,
+        reviewerEmail: _correoActual,
+        reviewerName: _nombreUsuarioActual,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          backgroundColor: _danger,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Theme(
@@ -178,7 +312,11 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
     bool showSedeBanner = false,
   }) {
     final cantPendientes = todasLasSolicitudes
-        .where((doc) => doc['estado'] == 'pendiente')
+        .where(
+          (doc) => _mostrarComoPendienteParaUsuario(
+            doc.data() as Map<String, dynamic>,
+          ),
+        )
         .length;
     final cantAprobadas = todasLasSolicitudes
         .where((doc) => doc['estado'] == 'aprobado')
@@ -188,7 +326,13 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
         .length;
 
     final solicitudesAMostrar = _filtroActual == 'Pendientes'
-        ? todasLasSolicitudes.where((doc) => doc['estado'] == 'pendiente').toList()
+        ? todasLasSolicitudes
+            .where(
+              (doc) => _mostrarComoPendienteParaUsuario(
+                doc.data() as Map<String, dynamic>,
+              ),
+            )
+            .toList()
         : todasLasSolicitudes;
 
     return LayoutBuilder(
@@ -236,7 +380,11 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
                         SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            'Gestionando solo solicitudes del personal de $_sedeLabel.',
+                            _resolvedSedeId == SedeAccess.matrizId &&
+                                    (_esRevisorPrimarioMatriz ||
+                                        _esRevisorFinalMatriz)
+                                ? 'Gestionando solo solicitudes del personal de $_sedeLabel con flujo de aprobacion por etapas.'
+                                : 'Gestionando solo solicitudes del personal de $_sedeLabel.',
                             style: TextStyle(
                               color: _bannerColor,
                               fontWeight: FontWeight.w700,
@@ -568,64 +716,48 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
     required int rechazadas,
     required int total,
   }) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final maxWidth = constraints.maxWidth;
-        final cardWidth = maxWidth >= 1400
-            ? (maxWidth - 54) / 4
-            : maxWidth >= 1040
-                ? (maxWidth - 36) / 3
-                : maxWidth >= 700
-                    ? (maxWidth - 18) / 2
-                    : maxWidth;
-
-        return Wrap(
-          spacing: 18,
-          runSpacing: 18,
-          children: [
-            SizedBox(
-              width: cardWidth,
-              child: _buildKpiCard(
-                title: 'Pendientes',
-                subtitle: 'Por resolver',
-                value: pendientes,
-                color: _warning,
-                icon: Icons.pending_actions_rounded,
-              ),
-            ),
-            SizedBox(
-              width: cardWidth,
-              child: _buildKpiCard(
-                title: 'Aprobadas',
-                subtitle: 'Gestión completada',
-                value: aprobadas,
-                color: _success,
-                icon: Icons.verified_rounded,
-              ),
-            ),
-            SizedBox(
-              width: cardWidth,
-              child: _buildKpiCard(
-                title: 'Rechazadas',
-                subtitle: 'Requieren seguimiento',
-                value: rechazadas,
-                color: _danger,
-                icon: Icons.highlight_off_rounded,
-              ),
-            ),
-            SizedBox(
-              width: cardWidth,
-              child: _buildKpiCard(
-                title: 'Total',
-                subtitle: 'Volumen general',
-                value: total,
-                color: _brandPrimary,
-                icon: Icons.assessment_rounded,
-              ),
-            ),
-          ],
-        );
-      },
+    return Row(
+      children: [
+        Expanded(
+          child: _buildKpiCard(
+            title: 'Pendientes',
+            subtitle: 'Por resolver',
+            value: pendientes,
+            color: _warning,
+            icon: Icons.pending_actions_rounded,
+          ),
+        ),
+        const SizedBox(width: 18),
+        Expanded(
+          child: _buildKpiCard(
+            title: 'Aprobadas',
+            subtitle: 'Gestión completada',
+            value: aprobadas,
+            color: _success,
+            icon: Icons.verified_rounded,
+          ),
+        ),
+        const SizedBox(width: 18),
+        Expanded(
+          child: _buildKpiCard(
+            title: 'Rechazadas',
+            subtitle: 'Requieren seguimiento',
+            value: rechazadas,
+            color: _danger,
+            icon: Icons.highlight_off_rounded,
+          ),
+        ),
+        const SizedBox(width: 18),
+        Expanded(
+          child: _buildKpiCard(
+            title: 'Total',
+            subtitle: 'Volumen general',
+            value: total,
+            color: _brandPrimary,
+            icon: Icons.assessment_rounded,
+          ),
+        ),
+      ],
     );
   }
 
@@ -984,7 +1116,7 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
 
   Widget _buildSolicitudCard(Map<String, dynamic> data, String idDoc) {
     final estado = (data['estado'] ?? '').toString();
-    final badge = _badgeStyle(estado);
+    final badge = _badgeStyle(data);
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -1051,7 +1183,7 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
                   ],
                 ),
               ),
-              _buildStatusBadge(estado),
+              _buildStatusBadge(data),
             ],
           ),
           const SizedBox(height: 18),
@@ -1071,6 +1203,25 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
               ),
             ],
           ),
+          if (_esSolicitudVacaciones(data)) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                _buildInfoPill(
+                  icon: Icons.beach_access_rounded,
+                  label: 'Disponibles',
+                  value: '${_resolverDiasDisponibles(data)}',
+                ),
+                _buildInfoPill(
+                  icon: Icons.event_note_rounded,
+                  label: 'A tomar',
+                  value: '${_resolverDiasATomar(data)}',
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 16),
           Container(
             width: double.infinity,
@@ -1109,24 +1260,24 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
           const Spacer(),
           Row(
             children: [
-              _buildPdfButton(data),
+              _buildPdfButton(data, idDoc),
               const Spacer(),
-              if (estado == 'pendiente') ...[
+              if (_puedeResolverSolicitud(data)) ...[
                 _buildActionButton(
-                  label: 'Aprobar',
+                  label: _labelBotonAprobar(data),
                   color: _success,
-                  onPressed: () => _fs.actualizarEstadoSolicitud(idDoc, 'aprobado'),
+                  onPressed: () => _resolverSolicitud(idDoc, 'aprobado'),
                 ),
                 const SizedBox(width: 10),
                 _buildActionButton(
                   label: 'Rechazar',
                   color: _danger,
                   outlined: true,
-                  onPressed: () => _fs.actualizarEstadoSolicitud(idDoc, 'cancel'),
+                  onPressed: () => _resolverSolicitud(idDoc, 'cancel'),
                 ),
               ] else
                 Text(
-                  _estadoTextoPlano(estado),
+                  _estadoTextoPlano(data),
                   style: GoogleFonts.manrope(
                     color: badge.color,
                     fontWeight: FontWeight.w800,
@@ -1187,8 +1338,8 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
     );
   }
 
-  Widget _buildStatusBadge(String estado) {
-    final badge = _badgeStyle(estado);
+  Widget _buildStatusBadge(Map<String, dynamic> data) {
+    final badge = _badgeStyle(data);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
@@ -1206,9 +1357,9 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
     );
   }
 
-  Widget _buildPdfButton(Map<String, dynamic> data) {
+  Widget _buildPdfButton(Map<String, dynamic> data, String idDoc) {
     return TextButton.icon(
-      onPressed: () => _generarPDF(data),
+      onPressed: () => _generarPDF(idDoc, data),
       style: TextButton.styleFrom(
         foregroundColor: _danger,
         backgroundColor:
@@ -1256,7 +1407,8 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
     );
   }
 
-  _StatusBadgeStyle _badgeStyle(String estado) {
+  _StatusBadgeStyle _badgeStyle(Map<String, dynamic> data) {
+    final estado = _normalize(data['estado']);
     switch (estado) {
       case 'aprobado':
         return const _StatusBadgeStyle(
@@ -1272,15 +1424,16 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
           softColor: Color(0xFFFCEBE7),
         );
       default:
-        return const _StatusBadgeStyle(
-          label: 'Pendiente',
+        return _StatusBadgeStyle(
+          label: _textoEtapaPendiente(data),
           color: _warning,
-          softColor: Color(0xFFFFF4E4),
+          softColor: const Color(0xFFFFF4E4),
         );
     }
   }
 
-  String _estadoTextoPlano(String estado) {
+  String _estadoTextoPlano(Map<String, dynamic> data) {
+    final estado = _normalize(data['estado']);
     switch (estado) {
       case 'aprobado':
         return 'Solicitud aprobada';
@@ -1288,7 +1441,7 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
       case 'cancel':
         return 'Solicitud rechazada';
       default:
-        return 'Solicitud pendiente';
+        return _textoEtapaPendiente(data);
     }
   }
 
@@ -1298,11 +1451,133 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
     return DateFormat('dd/MM/yyyy').format(dt);
   }
 
-  Future<void> _generarPDF(Map<String, dynamic> data) async {
-    final pdf = pw.Document();
-    final numFormulario = data['numFormulario']?.toString() ?? '00001';
+  String _normalizarTextoComparable(dynamic value) {
+    final texto = value?.toString().trim().toLowerCase() ?? '';
+    return texto
+        .replaceAll('á', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ú', 'u');
+  }
 
-    final image = await rootBundle.load('assets/images/logo_intesud3.png');
+  String _resolverNumeroFormulario(Map<String, dynamic> data) {
+    final valor = data['numFormulario'];
+    if (valor == null) return '00001';
+
+    final texto = valor.toString().trim();
+    final numero = int.tryParse(texto);
+    return numero?.toString().padLeft(5, '0') ?? texto;
+  }
+
+  dynamic _resolverFechaPermiso(Map<String, dynamic> data) {
+    return data['fechaPermiso'] ?? data['fechaInicio'] ?? data['fechaFin'];
+  }
+
+  String _resolverHorarioPermiso(Map<String, dynamic> data) {
+    return data['horarioPermiso']?.toString() ??
+        data['horasPermiso']?.toString() ??
+        '';
+  }
+
+  String _resolverCantidadHoras(Map<String, dynamic> data) {
+    final horario = _resolverHorarioPermiso(data);
+    final match = RegExp(
+      r'(\d{1,2}):(\d{2})\s*(?:a|-)\s*(\d{1,2}):(\d{2})',
+      caseSensitive: false,
+    ).firstMatch(horario);
+
+    if (match == null) {
+      return 'N/A';
+    }
+
+    final horaInicio = int.parse(match.group(1)!);
+    final minutoInicio = int.parse(match.group(2)!);
+    final horaFin = int.parse(match.group(3)!);
+    final minutoFin = int.parse(match.group(4)!);
+
+    final inicio = DateTime(2000, 1, 1, horaInicio, minutoInicio);
+    var fin = DateTime(2000, 1, 1, horaFin, minutoFin);
+    if (fin.isBefore(inicio)) {
+      fin = fin.add(const Duration(days: 1));
+    }
+
+    final duracion = fin.difference(inicio);
+    final horas = duracion.inHours;
+    final minutos = duracion.inMinutes.remainder(60);
+
+    if (minutos == 0) {
+      return '$horas h';
+    }
+
+    return '${horas}h ${minutos}m';
+  }
+
+  bool _opcionDescuentoSeleccionada(dynamic actual, String esperado) {
+    return _normalizarTextoComparable(actual) ==
+        _normalizarTextoComparable(esperado);
+  }
+
+  bool _esSolicitudVacaciones(Map<String, dynamic> data) {
+    return _normalizarTextoComparable(data['tipo']) == 'vacaciones';
+  }
+
+  int _resolverEntero(dynamic value, {int fallback = 0}) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '') ?? fallback;
+  }
+
+  int _resolverDiasDisponibles(Map<String, dynamic> data) {
+    return _resolverEntero(data['diasDisponibles']);
+  }
+
+  int _resolverDiasATomar(Map<String, dynamic> data) {
+    return _resolverEntero(data['diasATomar']);
+  }
+
+  int _resolverDiasAcumulados(Map<String, dynamic> data) {
+    final valor = _resolverEntero(data['diasAcumulados'], fallback: -1);
+    return valor >= 0 ? valor : _resolverDiasDisponibles(data);
+  }
+
+  int _resolverSaldoDias(Map<String, dynamic> data) {
+    final valor = _resolverEntero(data['saldoDias'], fallback: 1 << 30);
+    if (valor != (1 << 30)) return valor;
+    return _resolverDiasDisponibles(data) - _resolverDiasATomar(data);
+  }
+
+  int _resolverAnioVacaciones(Map<String, dynamic> data) {
+    final valor = _resolverEntero(data['anioVacaciones'], fallback: -1);
+    if (valor > 0) return valor;
+    final fecha = data['fechaInicio'];
+    if (fecha is Timestamp) return fecha.toDate().year;
+    if (fecha != null) return DateTime.parse(fecha.toString()).year;
+    return DateTime.now().year;
+  }
+
+  DateTime _resolverFechaRetorno(Map<String, dynamic> data) {
+    final fecha = data['fechaRetorno'];
+    if (fecha is Timestamp) return fecha.toDate();
+    if (fecha != null) return DateTime.parse(fecha.toString());
+    final fechaFin = data['fechaFin'];
+    if (fechaFin is Timestamp) {
+      return fechaFin.toDate().add(const Duration(days: 1));
+    }
+    if (fechaFin != null) {
+      return DateTime.parse(fechaFin.toString()).add(const Duration(days: 1));
+    }
+    return DateTime.now();
+  }
+
+  Future<void> _generarPDF(String idDoc, Map<String, dynamic> data) async {
+    final dataPdf = await _fs.asegurarNumeroFormularioSolicitud(idDoc, data);
+    final pdf = pw.Document();
+    final numFormulario = _resolverNumeroFormulario(dataPdf);
+
+    final logoAsset =
+        _branding.isMatriz ? _branding.logoHeader : _branding.logoPdf;
+    final image = await rootBundle.load(logoAsset);
     final logoBytes = image.buffer.asUint8List();
     final logoImage = pw.MemoryImage(logoBytes);
 
@@ -1315,8 +1590,9 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
           left: 3.0 * 28.35,
           right: 3.0 * 28.35,
         ),
-        build: (pw.Context ctx) =>
-            _buildPaginaFormulario(data, numFormulario, logoImage),
+        build: (pw.Context ctx) => _esSolicitudVacaciones(dataPdf)
+            ? _buildPaginaVacaciones(dataPdf, numFormulario, logoImage)
+            : _buildPaginaFormulario(dataPdf, numFormulario, logoImage),
       ),
     );
 
@@ -1333,43 +1609,103 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
   ) {
     const verdeIsts = PdfColor.fromInt(0xFF467879);
     final descontarDe = data['descontarDe'] ?? '';
+    final headerLogoWidth = _branding.isMatriz ? 86.0 : 62.0;
+    final headerLogoHeight = _branding.isMatriz ? 34.0 : 62.0;
+    final headerSpacing = _branding.isMatriz ? 8.0 : 10.0;
+    final textoNumero = 'N° $numFormulario';
 
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: [
-        pw.Row(
-          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+    return pw.Container(
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(width: 1.3, color: PdfColors.black),
+      ),
+      padding: const pw.EdgeInsets.all(10),
+      child: pw.Container(
+        decoration: pw.BoxDecoration(
+          border: pw.Border.all(width: 0.8, color: PdfColors.black),
+        ),
+        padding: const pw.EdgeInsets.fromLTRB(16, 16, 16, 10),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            pw.Image(logo, width: 130),
-            pw.Column(
+            pw.Align(
+              alignment: pw.Alignment.center,
+              child: pw.Row(
+                mainAxisSize: pw.MainAxisSize.min,
+                crossAxisAlignment: pw.CrossAxisAlignment.center,
+                children: [
+                  pw.Image(
+                    logo,
+                    width: headerLogoWidth,
+                    height: headerLogoHeight,
+                    fit: pw.BoxFit.contain,
+                  ),
+                  pw.SizedBox(width: headerSpacing),
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    mainAxisSize: pw.MainAxisSize.min,
+                    children: [
+                      pw.Text(
+                        _branding.subtitle.toUpperCase(),
+                        style: pw.TextStyle(fontSize: 6.5, letterSpacing: 0.3),
+                      ),
+                      pw.Text(
+                        _branding.displayName.toUpperCase(),
+                        style: pw.TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                      pw.Text(
+                        'Yo soy del INTESUD',
+                        style: pw.TextStyle(
+                          fontSize: 7,
+                          fontStyle: pw.FontStyle.italic,
+                          color: verdeIsts,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 10),
+            pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
               children: [
-                pw.Text(
-                  'SOLICITUD DE PERMISOS',
-                  style: pw.TextStyle(
-                    fontSize: 16,
-                    fontWeight: pw.FontWeight.bold,
+                pw.Expanded(
+                  child: pw.Column(
+                    children: [
+                      pw.Text(
+                        'SOLICITUD DE PERMISOS',
+                        textAlign: pw.TextAlign.center,
+                        style: pw.TextStyle(
+                          fontSize: 13,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                      pw.Text(
+                        'POR HORAS',
+                        textAlign: pw.TextAlign.center,
+                        style: pw.TextStyle(
+                          fontSize: 13,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
+                pw.SizedBox(width: 12),
                 pw.Text(
-                  'POR HORAS',
+                  textoNumero,
                   style: pw.TextStyle(
-                    fontSize: 16,
+                    color: PdfColors.red,
                     fontWeight: pw.FontWeight.bold,
+                    fontSize: 11,
                   ),
                 ),
               ],
             ),
-            pw.Text(
-              'N° $numFormulario',
-              style: pw.TextStyle(
-                color: PdfColors.red,
-                fontWeight: pw.FontWeight.bold,
-                fontSize: 12,
-              ),
-            ),
-          ],
-        ),
-        pw.SizedBox(height: 30),
+            pw.SizedBox(height: 18),
         _campoPdf(
           'Nombre del colaborador:',
           data['colaborador']?.toString().toUpperCase() ?? '',
@@ -1381,146 +1717,343 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
         ),
         _campoPdf(
           'Fecha de permiso:',
-          _formatearFechaSimple(data['fechaPermiso']),
+          _formatearFechaSimple(_resolverFechaPermiso(data)),
         ),
-        pw.Row(
-          children: [
-            pw.Text(
-              'Horas: ________',
-              style: pw.TextStyle(
-                fontWeight: pw.FontWeight.bold,
-                fontSize: 11,
-              ),
-            ),
-            pw.SizedBox(width: 10),
-            pw.Expanded(
-              child: _campoPdf('Horario del permiso:', data['horarioPermiso'] ?? ''),
-            ),
-          ],
-        ),
-        pw.SizedBox(height: 30),
-        pw.Row(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.Padding(
-              padding: const pw.EdgeInsets.only(top: 5),
-              child: pw.Text(
-                'DESCONTAR DE:',
-                style: pw.TextStyle(
-                  fontWeight: pw.FontWeight.bold,
-                  fontSize: 11,
-                ),
-              ),
-            ),
-            pw.Spacer(),
-            pw.Column(
+            pw.Row(
               crossAxisAlignment: pw.CrossAxisAlignment.end,
               children: [
-                _itemCheckPdf('VACACIONES', descontarDe == 'Vacaciones'),
-                pw.SizedBox(height: 8),
-                _itemCheckPdf('REMUNERACIÓN', descontarDe == 'Remuneracion'),
-                pw.SizedBox(height: 8),
-                _itemCheckPdf(
-                  'SIN DESCUENTO\n(Licencias)',
-                  descontarDe == 'Sin descuento',
-                  multiline: true,
+                pw.SizedBox(
+                  width: 130,
+                  child: _campoPdf(
+                    'Horas:',
+                    _resolverCantidadHoras(data),
+                  ),
                 ),
-                pw.SizedBox(height: 8),
-                _itemCheckPdf(
-                  'RECUPERACIÓN DE HORAS',
-                  descontarDe == 'Recuperacion de horas',
+                pw.SizedBox(width: 10),
+                pw.Expanded(
+                  child: _campoPdf(
+                    'Horario del permiso:',
+                    _resolverHorarioPermiso(data),
+                  ),
                 ),
               ],
             ),
-          ],
-        ),
-        pw.SizedBox(height: 60),
+            pw.SizedBox(height: 20),
+            pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
+              children: [
+                pw.Expanded(
+                  child: pw.Padding(
+                    padding: const pw.EdgeInsets.only(left: 18),
+                    child: pw.Text(
+                      'DESCONTAR DE:',
+                      style: pw.TextStyle(
+                        fontSize: 10,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+                pw.SizedBox(
+                  width: 220,
+                  child: pw.Column(
+                    children: [
+                      _itemCheckPdf(
+                        'VACACIONES',
+                        _opcionDescuentoSeleccionada(descontarDe, 'Vacaciones'),
+                      ),
+                      pw.SizedBox(height: 7),
+                      _itemCheckPdf(
+                        'REMUNERACION',
+                        _opcionDescuentoSeleccionada(
+                          descontarDe,
+                          'Remuneracion',
+                        ),
+                      ),
+                      pw.SizedBox(height: 7),
+                      _itemCheckPdf(
+                        'SIN DESCUENTO\n(Licencias)',
+                        _opcionDescuentoSeleccionada(
+                          descontarDe,
+                          'Sin Descuento',
+                        ),
+                        multiline: true,
+                      ),
+                      pw.SizedBox(height: 7),
+                      _itemCheckPdf(
+                        'RECUPERACION DE HORAS',
+                        _opcionDescuentoSeleccionada(
+                          descontarDe,
+                          'Recuperacion de horas',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 42),
         pw.Row(
           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            _firmaBloquePdf('Firma del trabajador\nNo. Cédula: ...........'),
+            _firmaBloquePdf('Firma del trabajador\nNo. Cedula: ...............'),
             _firmaBloquePdf('Autoriza\nJefe inmediato'),
           ],
         ),
-        pw.SizedBox(height: 50),
+        pw.SizedBox(height: 42),
         pw.Row(
           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-          crossAxisAlignment: pw.CrossAxisAlignment.end,
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
             _firmaBloquePdf('Revisado\nRecursos Humanos'),
-            pw.Column(
-              children: [
-                _firmaBloquePdf('Rector\nGerencia General'),
-                pw.SizedBox(height: 10),
-                pw.Row(
-                  children: [
-                    pw.Container(
-                      width: 18,
-                      height: 18,
-                      decoration: pw.BoxDecoration(
-                        border: pw.Border.all(width: 0.8),
-                      ),
-                    ),
-                    pw.SizedBox(width: 10),
-                    pw.Container(
-                      width: 18,
-                      height: 18,
-                      decoration: pw.BoxDecoration(
-                        border: pw.Border.all(width: 0.8),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+            _firmaBloquePdfConCuadros('Rector', 'Gerencia General'),
           ],
         ),
         pw.Spacer(),
-        pw.Divider(thickness: 0.5, color: PdfColors.grey400),
-        pw.Row(
-          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-          children: [
-            pw.Text(
-              'Documento generado por NatyApp - ISTS',
-              style: const pw.TextStyle(fontSize: 7),
+        pw.Container(
+          margin: const pw.EdgeInsets.only(top: 10),
+          padding: const pw.EdgeInsets.only(top: 4),
+          decoration: const pw.BoxDecoration(
+            border: pw.Border(
+              top: pw.BorderSide(width: 0.6, color: PdfColors.black),
             ),
-            pw.Text(
-              'Yo soy del INTESUD',
-              style: pw.TextStyle(
-                fontSize: 7,
-                fontStyle: pw.FontStyle.italic,
-                color: verdeIsts,
+          ),
+          child: pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text(
+                'FORMATO INTERNO DE SOLICITUD',
+                style: const pw.TextStyle(fontSize: 6),
+              ),
+              pw.Text(
+                'Documento generado por NatyApp',
+                style: const pw.TextStyle(fontSize: 6),
+              ),
+            ],
+          ),
+        ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  pw.Widget _buildPaginaVacaciones(
+    Map<String, dynamic> data,
+    String numFormulario,
+    pw.MemoryImage logo,
+  ) {
+    final headerLogoWidth = _branding.isMatriz ? 86.0 : 62.0;
+    final headerLogoHeight = _branding.isMatriz ? 34.0 : 62.0;
+    final headerSpacing = _branding.isMatriz ? 8.0 : 10.0;
+    final textoNumero = 'N° $numFormulario';
+    final diasDisponibles = _resolverDiasDisponibles(data);
+    final diasATomar = _resolverDiasATomar(data);
+    final diasAcumulados = _resolverDiasAcumulados(data);
+    final saldoDias = _resolverSaldoDias(data);
+    final anioVacaciones = _resolverAnioVacaciones(data);
+    final fechaRetorno = _resolverFechaRetorno(data);
+
+    return pw.Container(
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(width: 1.3, color: PdfColors.black),
+      ),
+      padding: const pw.EdgeInsets.all(10),
+      child: pw.Container(
+        decoration: pw.BoxDecoration(
+          border: pw.Border.all(width: 0.8, color: PdfColors.black),
+        ),
+        padding: const pw.EdgeInsets.fromLTRB(16, 16, 16, 10),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Align(
+              alignment: pw.Alignment.center,
+              child: pw.Row(
+                mainAxisSize: pw.MainAxisSize.min,
+                crossAxisAlignment: pw.CrossAxisAlignment.center,
+                children: [
+                  pw.Image(
+                    logo,
+                    width: headerLogoWidth,
+                    height: headerLogoHeight,
+                    fit: pw.BoxFit.contain,
+                  ),
+                  pw.SizedBox(width: headerSpacing),
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    mainAxisSize: pw.MainAxisSize.min,
+                    children: [
+                      pw.Text(
+                        _branding.subtitle.toUpperCase(),
+                        style: pw.TextStyle(fontSize: 6.5, letterSpacing: 0.3),
+                      ),
+                      pw.Text(
+                        _branding.displayName.toUpperCase(),
+                        style: pw.TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                      pw.Text(
+                        'Yo soy del INTESUD',
+                        style: pw.TextStyle(
+                          fontSize: 7,
+                          fontStyle: pw.FontStyle.italic,
+                          color: const PdfColor.fromInt(0xFF467879),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 12),
+            pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
+              children: [
+                pw.Expanded(
+                  child: pw.Text(
+                    'SOLICITUD DE VACACIONES',
+                    textAlign: pw.TextAlign.center,
+                    style: pw.TextStyle(
+                      fontSize: 13,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                ),
+                pw.SizedBox(width: 12),
+                pw.Text(
+                  textoNumero,
+                  style: pw.TextStyle(
+                    color: PdfColors.red,
+                    fontWeight: pw.FontWeight.bold,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 22),
+            _campoPdf(
+              'Nombre del colaborador:',
+              data['colaborador']?.toString().toUpperCase() ?? '',
+            ),
+            _campoPdf(
+              'Fecha de solicitud:',
+              _formatearFechaSimple(data['fechaSolicitud'] ?? DateTime.now()),
+            ),
+            pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.end,
+              children: [
+                pw.Expanded(
+                  child: _campoPdf(
+                    'Dispone de N° de dias:',
+                    '$diasDisponibles',
+                  ),
+                ),
+                pw.SizedBox(width: 14),
+                pw.SizedBox(
+                  width: 120,
+                  child: _campoPdf('Año:', '$anioVacaciones'),
+                ),
+              ],
+            ),
+            _campoPdf('Dias acumulados:', '$diasAcumulados'),
+            _campoPdf('N° de dias a tomar:', '$diasATomar'),
+            pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.end,
+              children: [
+                pw.Expanded(
+                  child: _campoPdf(
+                    'Desde:',
+                    _formatearFechaSimple(data['fechaInicio']),
+                  ),
+                ),
+                pw.SizedBox(width: 14),
+                pw.Expanded(
+                  child: _campoPdf(
+                    'Hasta:',
+                    _formatearFechaSimple(data['fechaFin']),
+                  ),
+                ),
+              ],
+            ),
+            _campoPdf(
+              'Fecha de retorno:',
+              DateFormat('dd/MM/yyyy').format(fechaRetorno),
+            ),
+            _campoPdf('Saldo dias:', '$saldoDias'),
+            pw.Spacer(),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                _firmaBloquePdf('Firma del trabajador\nNo. Cedula: ...............'),
+                _firmaBloquePdf('Autoriza\nJefe inmediato'),
+              ],
+            ),
+            pw.SizedBox(height: 42),
+            pw.Align(
+              alignment: pw.Alignment.center,
+              child: _firmaBloquePdf('Revisado\nRecursos Humanos'),
+            ),
+            pw.Container(
+              margin: const pw.EdgeInsets.only(top: 10),
+              padding: const pw.EdgeInsets.only(top: 4),
+              decoration: const pw.BoxDecoration(
+                border: pw.Border(
+                  top: pw.BorderSide(width: 0.6, color: PdfColors.black),
+                ),
+              ),
+              child: pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    'FORMATO INTERNO DE VACACIONES',
+                    style: const pw.TextStyle(fontSize: 6),
+                  ),
+                  pw.Text(
+                    'Documento generado por NatyApp',
+                    style: const pw.TextStyle(fontSize: 6),
+                  ),
+                ],
               ),
             ),
           ],
         ),
-      ],
+      ),
     );
   }
 
   pw.Widget _itemCheckPdf(String etiqueta, bool marcado, {bool multiline = false}) {
     return pw.Row(
-      mainAxisSize: pw.MainAxisSize.min,
+      mainAxisAlignment: pw.MainAxisAlignment.end,
+      crossAxisAlignment:
+          multiline ? pw.CrossAxisAlignment.start : pw.CrossAxisAlignment.center,
       children: [
-        pw.Text(
-          etiqueta,
-          textAlign: pw.TextAlign.right,
-          style: pw.TextStyle(
-            fontSize: 10,
-            fontWeight: pw.FontWeight.bold,
+        pw.Expanded(
+          child: pw.Text(
+            etiqueta,
+            textAlign: pw.TextAlign.right,
+            style: pw.TextStyle(
+              fontSize: multiline ? 8.5 : 9.5,
+              fontWeight: pw.FontWeight.bold,
+              lineSpacing: 1.2,
+            ),
           ),
         ),
-        pw.SizedBox(width: 10),
+        pw.SizedBox(width: 9),
         pw.Container(
-          width: 20,
-          height: 20,
+          width: 16,
+          height: 16,
           decoration: pw.BoxDecoration(border: pw.Border.all(width: 1)),
           child: marcado
               ? pw.Center(
                   child: pw.Text(
                     'X',
                     style: pw.TextStyle(
-                      fontSize: 12,
+                      fontSize: 10,
                       fontWeight: pw.FontWeight.bold,
                     ),
                   ),
@@ -1533,20 +2066,26 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
 
   pw.Widget _campoPdf(String label, String valor) {
     return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(vertical: 6),
+      padding: const pw.EdgeInsets.symmetric(vertical: 5),
       child: pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.end,
         children: [
           pw.Text(
             label,
-            style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 11),
+            style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9),
           ),
-          pw.SizedBox(width: 8),
+          pw.SizedBox(width: 6),
           pw.Expanded(
             child: pw.Container(
+              padding: const pw.EdgeInsets.only(bottom: 1),
               decoration: const pw.BoxDecoration(
-                border: pw.Border(bottom: pw.BorderSide(width: 0.8)),
+                border: pw.Border(bottom: pw.BorderSide(width: 0.7)),
               ),
-              child: pw.Text(valor, style: const pw.TextStyle(fontSize: 11)),
+              child: pw.Text(
+                valor,
+                style: const pw.TextStyle(fontSize: 9.5),
+                maxLines: 2,
+              ),
             ),
           ),
         ],
@@ -1558,18 +2097,81 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
     return pw.Column(
       children: [
         pw.Container(
-          width: 160,
-          decoration: const pw.BoxDecoration(
-            border: pw.Border(top: pw.BorderSide(width: 0.8)),
+          width: 150,
+          child: pw.Text(
+            '.................................',
+            textAlign: pw.TextAlign.center,
+            style: const pw.TextStyle(fontSize: 8, letterSpacing: 0.6),
           ),
         ),
-        pw.SizedBox(height: 4),
+        pw.SizedBox(height: 3),
         pw.Text(
           cargo,
           textAlign: pw.TextAlign.center,
-          style: pw.TextStyle(fontSize: 10),
+          style: pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold),
         ),
       ],
+    );
+  }
+
+  pw.Widget _firmaBloquePdfConCuadros(String linea1, String linea2) {
+    return pw.Column(
+      children: [
+        pw.Container(
+          width: 150,
+          child: pw.Text(
+            '.................................',
+            textAlign: pw.TextAlign.center,
+            style: const pw.TextStyle(fontSize: 8, letterSpacing: 0.6),
+          ),
+        ),
+        pw.SizedBox(height: 3),
+        pw.Row(
+          mainAxisSize: pw.MainAxisSize.min,
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
+              children: [
+                pw.Text(
+                  linea1,
+                  textAlign: pw.TextAlign.center,
+                  style: pw.TextStyle(
+                    fontSize: 8.5,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.Text(
+                  linea2,
+                  textAlign: pw.TextAlign.center,
+                  style: pw.TextStyle(
+                    fontSize: 8.5,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            pw.SizedBox(width: 10),
+            pw.Column(
+              children: [
+                _cajaVaciaPdf(),
+                pw.SizedBox(height: 4),
+                _cajaVaciaPdf(),
+              ],
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  pw.Widget _cajaVaciaPdf() {
+    return pw.Container(
+      width: 14,
+      height: 14,
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(width: 0.8),
+      ),
     );
   }
 }

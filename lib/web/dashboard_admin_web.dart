@@ -402,7 +402,7 @@ class DashboardAdminWeb extends StatelessWidget {
                     _primary,
                   ),
                   _buildMiniMetric(
-                    'Administrativos',
+                    'Personal administrativo',
                     '$administrativos',
                     Icons.badge_outlined,
                     _secondary,
@@ -651,6 +651,12 @@ class DashboardAdminWeb extends StatelessWidget {
   }
 
   bool _matchesRole(Map<String, dynamic> data, String role) {
+    if (UserRoleAccess.isAdministrativeRole(role)) {
+      return UserRoleAccess.isAdministrativeRole(data['rol']);
+    }
+    if (UserRoleAccess.isTeacherRole(role)) {
+      return UserRoleAccess.isTeacherRole(data['rol']);
+    }
     return (data['rol'] ?? '').toString().trim().toLowerCase() ==
         role.toLowerCase();
   }

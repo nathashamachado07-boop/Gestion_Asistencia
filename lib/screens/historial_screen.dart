@@ -7,12 +7,14 @@ class HistorialScreen extends StatelessWidget {
   const HistorialScreen({
     super.key,
     required this.nombreDocente,
+    required this.correoUsuario,
     this.esAlmuerzo = false,
     this.isSedeNorte = false,
     this.sedeId,
   });
 
   final String nombreDocente;
+  final String correoUsuario;
   final bool esAlmuerzo;
   final bool isSedeNorte;
   final String? sedeId;
@@ -41,15 +43,15 @@ class HistorialScreen extends StatelessWidget {
             _itemDetalle('Docente:', nombreDocente),
             _itemDetalle(
               'Tipo:',
-              reg['tipo'] ?? (esAlmuerzo ? 'ALMUERZO' : 'No definido'),
+              reg['tipo'] ??
+                  (esAlmuerzo
+                      ? (reg['estado'] == 'finalizado' ? 'REGRESO' : 'SALIDA')
+                      : 'No definido'),
             ),
             _itemDetalle('Estado:', reg['estado'] ?? 'N/A'),
             _itemDetalle(
-              'Hora:',
-              reg['hora_marcada'] ??
-                  reg['hora'] ??
-                  reg['hora_salida'] ??
-                  'S/H',
+              esAlmuerzo ? 'Salida:' : 'Hora:',
+              reg['hora_marcada'] ?? reg['hora'] ?? reg['hora_salida'] ?? 'S/H',
             ),
             if (reg['hora_regreso'] != null)
               _itemDetalle('Regreso:', reg['hora_regreso']),
@@ -104,7 +106,9 @@ class HistorialScreen extends StatelessWidget {
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: FutureBuilder<List<Map<String, dynamic>>>(
-        future: service.obtenerHistorialAsistencias(nombreDocente),
+        future: esAlmuerzo
+            ? service.obtenerHistorialAlmuerzo(correoUsuario)
+            : service.obtenerHistorialAsistencias(nombreDocente),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return Center(
@@ -129,13 +133,18 @@ class HistorialScreen extends StatelessWidget {
             itemCount: registros.length,
             itemBuilder: (context, index) {
               final reg = registros[index];
-              final horaMostrar = reg['hora_marcada'] ??
-                  reg['hora'] ??
-                  reg['hora_salida'] ??
-                  'S/H';
-              final tipoRegistro =
-                  reg['tipo'] ?? (esAlmuerzo ? 'ALMUERZO' : 'REGISTRO');
+              final horaMostrar = esAlmuerzo
+                  ? (reg['hora_salida'] ?? 'S/H')
+                  : (reg['hora_marcada'] ?? reg['hora'] ?? 'S/H');
+              final tipoRegistro = esAlmuerzo
+                  ? ((reg['estado'] == 'finalizado') ? 'REGRESO' : 'SALIDA')
+                  : (reg['tipo'] ?? 'REGISTRO');
               final esEntrada = tipoRegistro == 'ENTRADA';
+              final estadoTexto = (reg['estado'] ?? '').toString();
+              final estadoNormalizado = estadoTexto.toLowerCase();
+              final esEstadoPositivo = estadoNormalizado == 'a tiempo' ||
+                  estadoNormalizado == 'completada' ||
+                  estadoNormalizado == 'finalizado';
 
               return Card(
                 elevation: 3,
@@ -161,7 +170,9 @@ class HistorialScreen extends StatelessWidget {
                     ),
                   ),
                   subtitle: Text(
-                    esAlmuerzo ? 'Salida: $horaMostrar' : 'Hora: $horaMostrar',
+                    esAlmuerzo
+                        ? 'Salida: $horaMostrar'
+                        : 'Hora: $horaMostrar',
                   ),
                   trailing: Container(
                     padding: const EdgeInsets.symmetric(
@@ -169,19 +180,15 @@ class HistorialScreen extends StatelessWidget {
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: reg['estado'] == 'A tiempo' ||
-                              reg['estado'] == 'Completada' ||
-                              reg['estado'] == 'finalizado'
+                      color: esEstadoPositivo
                           ? Colors.green.withOpacity(0.1)
                           : Colors.orange.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
-                      (reg['estado'] ?? '').toUpperCase(),
+                      estadoTexto.toUpperCase(),
                       style: TextStyle(
-                        color: reg['estado'] == 'A tiempo' ||
-                                reg['estado'] == 'Completada' ||
-                                reg['estado'] == 'finalizado'
+                        color: esEstadoPositivo
                             ? Colors.green
                             : Colors.orange,
                         fontWeight: FontWeight.bold,
