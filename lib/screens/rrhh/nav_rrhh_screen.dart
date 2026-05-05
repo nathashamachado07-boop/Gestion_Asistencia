@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'almuerzos_rrhh_screen.dart';
-import 'avisos_rrhh_screen.dart';
+// import 'avisos_rrhh_screen.dart'; // Ya no es necesario aquí
 import 'empleados_rrhh_screen.dart';
 import 'reportes_rrhh_screen.dart';
 
@@ -19,10 +19,10 @@ class _NavRRHHScreenState extends State<NavRRHHScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Solo 3 pantallas: Reportes, Almuerzos y Empleados
     final paginas = [
       ReportesRRHHScreen(userData: widget.userData),
       AlmuerzosRRHHScreen(userData: widget.userData),
-      AvisosRRHHScreen(userData: widget.userData),
       EmpleadosRRHHScreen(userData: widget.userData),
     ];
 
@@ -45,10 +45,6 @@ class _NavRRHHScreenState extends State<NavRRHHScreen> {
           BottomNavigationBarItem(
             icon: Icon(Icons.restaurant_menu_outlined),
             label: 'Almuerzos',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.campaign_outlined),
-            label: 'Avisos',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.people_alt_outlined),

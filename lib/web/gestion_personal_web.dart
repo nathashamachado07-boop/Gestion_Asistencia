@@ -1025,211 +1025,230 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
 
   Widget _buildSolicitudesGrid(List<QueryDocumentSnapshot> solicitudes, double width) {
     if (solicitudes.isEmpty) {
-        return Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 42),
-          decoration: BoxDecoration(
-            color: _cardSurface.withOpacity(0.96),
-            borderRadius: BorderRadius.circular(_isNorth ? 32 : 28),
-            border: Border.all(
-              color: _panelBorderColor,
-            ),
-          ),
-          child: Column(
+      return _buildEmptyState();
+    }
+
+    // Para pantallas anchas usamos 2 columnas; angostas, 1 columna
+    final useTwoColumns = width > 800;
+
+    if (!useTwoColumns) {
+      return ListView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: solicitudes.length,
+        itemBuilder: (context, index) {
+          final data = solicitudes[index].data() as Map<String, dynamic>;
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 18),
+            child: _buildSolicitudCard(data, solicitudes[index].id),
+          );
+        },
+      );
+    }
+
+    // Grid de 2 columnas
+    final rows = <Widget>[];
+    for (var i = 0; i < solicitudes.length; i += 2) {
+      final left = solicitudes[i].data() as Map<String, dynamic>;
+      final leftId = solicitudes[i].id;
+      final hasRight = i + 1 < solicitudes.length;
+      final right = hasRight ? solicitudes[i + 1].data() as Map<String, dynamic> : null;
+      final rightId = hasRight ? solicitudes[i + 1].id : null;
+
+      rows.add(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 18),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 74,
-                height: 74,
-                decoration: BoxDecoration(
-                  color: _brandAccent.withOpacity(0.55),
-                  borderRadius: BorderRadius.circular(_isNorth ? 28 : 24),
-                ),
-                child: Icon(
-                  Icons.inbox_rounded,
-                  size: 34,
-                  color: _brandPrimaryDark,
-                ),
+              Expanded(child: _buildSolicitudCard(left, leftId)),
+              const SizedBox(width: 18),
+              Expanded(
+                child: hasRight
+                    ? _buildSolicitudCard(right!, rightId!)
+                    : const SizedBox(),
               ),
-            const SizedBox(height: 18),
-            Text(
-              'No hay solicitudes por revisar',
-              style: GoogleFonts.manrope(
-                fontSize: 22,
-                color: _ink,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Cuando ingresen nuevas solicitudes aparecerán aquí con sus acciones disponibles.',
-              textAlign: TextAlign.center,
-              style: GoogleFonts.manrope(
-                fontSize: 14,
-                color: _muted,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       );
     }
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        int crossAxisCount = 1;
-        if (constraints.maxWidth > 1500) {
-          crossAxisCount = 4;
-        } else if (constraints.maxWidth > 1100) {
-          crossAxisCount = 3;
-        } else if (constraints.maxWidth > 760) {
-          crossAxisCount = 2;
-        }
+    return Column(children: rows);
+  }
 
-        final aspectRatio = crossAxisCount == 4
-            ? 1.03
-            : crossAxisCount == 3
-                ? 1.02
-                : crossAxisCount == 2
-                    ? 1.08
-                    : width > 700
-                        ? 1.32
-                        : 1.06;
-
-        return GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: solicitudes.length,
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: crossAxisCount,
-            crossAxisSpacing: 18,
-            mainAxisSpacing: 18,
-            childAspectRatio: aspectRatio,
+  Widget _buildEmptyState() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 42),
+      decoration: BoxDecoration(
+        color: _cardSurface.withOpacity(0.96),
+        borderRadius: BorderRadius.circular(_isNorth ? 32 : 28),
+        border: Border.all(color: _panelBorderColor),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 74,
+            height: 74,
+            decoration: BoxDecoration(
+              color: _brandAccent.withOpacity(0.55),
+              borderRadius: BorderRadius.circular(_isNorth ? 28 : 24),
+            ),
+            child: Icon(Icons.inbox_rounded, size: 34, color: _brandPrimaryDark),
           ),
-          itemBuilder: (context, index) {
-            final data = solicitudes[index].data() as Map<String, dynamic>;
-            return _buildSolicitudCard(data, solicitudes[index].id);
-          },
-        );
-      },
+          const SizedBox(height: 18),
+          Text(
+            'No hay solicitudes por revisar',
+            style: GoogleFonts.manrope(
+              fontSize: 22,
+              color: _ink,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Cuando ingresen nuevas solicitudes aparecerán aquí con sus acciones disponibles.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.manrope(
+              fontSize: 14,
+              color: _muted,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
+  // ── CARD vertical estilo imagen 1 ─────────────────────────────────────────
   Widget _buildSolicitudCard(Map<String, dynamic> data, String idDoc) {
-    final estado = (data['estado'] ?? '').toString();
     final badge = _badgeStyle(data);
+    final tipo = (data['tipo'] ?? '').toString().trim().toUpperCase();
 
     return Container(
-      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: _cardSurface.withOpacity(0.98),
-        borderRadius: BorderRadius.circular(_isNorth ? 32 : 28),
-        border: Border.all(color: badge.color.withOpacity(0.26)),
+        color: _cardSurface,
+        borderRadius: BorderRadius.circular(_isNorth ? 24 : 20),
+        border: Border.all(color: badge.color.withOpacity(0.18)),
         boxShadow: [
           BoxShadow(
-            color: (_isNorth ? badge.color : Colors.black).withOpacity(
-              _isNorth ? 0.10 : 0.045,
-            ),
-            blurRadius: _isNorth ? 28 : 22,
-            offset: const Offset(0, 12),
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [badge.softColor, badge.color.withOpacity(0.15)],
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Icon(
-                  Icons.badge_rounded,
-                  color: badge.color,
-                  size: 24,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      data['colaborador'] ?? 'Colaborador',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.manrope(
-                        color: _ink,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 17,
-                      ),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      data['tipo']?.toString().toUpperCase() ?? 'SOLICITUD',
-                      style: GoogleFonts.manrope(
-                        color: _brandPrimary,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 12,
-                        letterSpacing: 0.8,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              _buildStatusBadge(data),
-            ],
-          ),
-          const SizedBox(height: 18),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              _buildInfoPill(
-                icon: Icons.calendar_today_rounded,
-                label: 'Inicio',
-                value: _formatearFechaSimple(data['fechaInicio']),
-              ),
-              _buildInfoPill(
-                icon: Icons.event_available_rounded,
-                label: 'Fin',
-                value: _formatearFechaSimple(data['fechaFin']),
-              ),
-            ],
-          ),
-          if (_esSolicitudVacaciones(data)) ...[
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
+          // ── Cabecera: avatar + nombre + tipo badge + estado ───────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildInfoPill(
-                  icon: Icons.beach_access_rounded,
-                  label: 'Disponibles',
-                  value: '${_resolverDiasDisponibles(data)}',
+                // Avatar inicial
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: badge.color.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Center(
+                    child: Text(
+                      (data['colaborador'] ?? '?').toString().trim().isNotEmpty
+                          ? (data['colaborador'] as String).trim()[0].toUpperCase()
+                          : '?',
+                      style: GoogleFonts.manrope(
+                        color: badge.color,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
                 ),
-                _buildInfoPill(
-                  icon: Icons.event_note_rounded,
-                  label: 'A tomar',
-                  value: '${_resolverDiasATomar(data)}',
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        data['colaborador'] ?? 'Colaborador',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.manrope(
+                          color: _ink,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      // Badge tipo (PERMISO / VACACIONES)
+                      if (tipo.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _brandPrimary.withOpacity(0.10),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            tipo,
+                            style: GoogleFonts.manrope(
+                              color: _brandPrimary,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Badge estado (esquina superior derecha)
+                _buildStatusBadge(data),
+              ],
+            ),
+          ),
+
+          // ── Divisor ──────────────────────────────────────────────────
+          Divider(
+            height: 1,
+            thickness: 1,
+            color: _panelBorderColor,
+            indent: 20,
+            endIndent: 20,
+          ),
+
+          // ── Fechas con iconos ─────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+            child: Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              children: [
+                _buildDateChip(
+                  icon: Icons.calendar_today_outlined,
+                  label: 'Inicio',
+                  value: _formatearFechaSimple(data['fechaInicio']),
+                ),
+                _buildDateChip(
+                  icon: Icons.event_outlined,
+                  label: 'Fin',
+                  value: _formatearFechaSimple(data['fechaFin']),
                 ),
               ],
             ),
-          ],
-          const SizedBox(height: 16),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: _softPanel,
-              borderRadius: BorderRadius.circular(_isNorth ? 22 : 18),
-            ),
+          ),
+
+          // ── Motivo ───────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1239,51 +1258,110 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
                     color: _muted,
                     fontSize: 11,
                     fontWeight: FontWeight.w800,
-                    letterSpacing: 0.7,
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 4),
                 Text(
                   data['motivo'] ?? 'Sin motivo especificado',
-                  maxLines: 4,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.manrope(
-                    fontSize: 13,
                     color: _ink,
-                    height: 1.5,
+                    fontSize: 13,
                     fontWeight: FontWeight.w600,
+                    height: 1.4,
                   ),
                 ),
               ],
             ),
           ),
-          const Spacer(),
-          Row(
-            children: [
-              _buildPdfButton(data, idDoc),
-              const Spacer(),
-              if (_puedeResolverSolicitud(data)) ...[
-                _buildActionButton(
-                  label: _labelBotonAprobar(data),
-                  color: _success,
-                  onPressed: () => _resolverSolicitud(idDoc, 'aprobado'),
-                ),
-                const SizedBox(width: 10),
-                _buildActionButton(
-                  label: 'Rechazar',
-                  color: _danger,
-                  outlined: true,
-                  onPressed: () => _resolverSolicitud(idDoc, 'cancel'),
-                ),
-              ] else
-                Text(
-                  _estadoTextoPlano(data),
-                  style: GoogleFonts.manrope(
-                    color: badge.color,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 12,
+
+          const SizedBox(height: 18),
+
+          // ── Pie: PDF + acciones ───────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            decoration: BoxDecoration(
+              color: _softPanel.withOpacity(0.6),
+              borderRadius: const BorderRadius.only(
+                bottomLeft: Radius.circular(20),
+                bottomRight: Radius.circular(20),
+              ),
+              border: Border(
+                top: BorderSide(color: _panelBorderColor),
+              ),
+            ),
+            child: Row(
+              children: [
+                _buildPdfButton(data, idDoc),
+                const Spacer(),
+                if (_puedeResolverSolicitud(data)) ...[
+                  _buildActionButton(
+                    label: _labelBotonAprobar(data),
+                    color: _success,
+                    onPressed: () => _resolverSolicitud(idDoc, 'aprobado'),
                   ),
+                  const SizedBox(width: 10),
+                  _buildActionButton(
+                    label: 'Rechazar',
+                    color: _danger,
+                    outlined: true,
+                    onPressed: () => _resolverSolicitud(idDoc, 'cancel'),
+                  ),
+                ] else
+                  Text(
+                    _estadoTextoPlano(data),
+                    style: GoogleFonts.manrope(
+                      color: badge.color,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Chip de fecha con icono ───────────────────────────────────────────────
+  Widget _buildDateChip({
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: _softPanel,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _panelBorderColor),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: _brandPrimary),
+          const SizedBox(width: 6),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: GoogleFonts.manrope(
+                  color: _muted,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
                 ),
+              ),
+              Text(
+                value,
+                style: GoogleFonts.manrope(
+                  color: _ink,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
             ],
           ),
         ],
