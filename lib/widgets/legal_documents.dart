@@ -176,6 +176,7 @@ Future<PasswordRecoveryDialogResult?> showPasswordRecoveryDialog(
           }
 
           Future<void> restablecerPassword() async {
+            var cierreExitoso = false;
             final correo = correoController.text.trim().toLowerCase();
             final codigo = codigoController.text.trim();
             final nuevaPassword = nuevaPasswordController.text.trim();
@@ -224,6 +225,7 @@ Future<PasswordRecoveryDialogResult?> showPasswordRecoveryDialog(
 
               if (!dialogContext.mounted) return;
 
+              cierreExitoso = true;
               Navigator.of(dialogContext).pop(
                 PasswordRecoveryDialogResult(
                   correo: correo,
@@ -238,7 +240,7 @@ Future<PasswordRecoveryDialogResult?> showPasswordRecoveryDialog(
                 mensajeEsError = true;
               });
             } finally {
-              if (dialogContext.mounted) {
+              if (dialogContext.mounted && !cierreExitoso) {
                 setDialogState(() => guardandoPassword = false);
               }
             }

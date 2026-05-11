@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -13,6 +14,8 @@ class FirebaseService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final PasswordSecurityService _passwordSecurity = PasswordSecurityService();
   static const String _functionsRegion = 'us-central1';
+  static const int _passwordRecoveryExpirationMinutes = 10;
+  static const int _passwordRecoveryMaxAttempts = 5;
 
   // --- COORDENADAS DEL INSTITUTO ---
   static const double latitudInstituto = -0.1843090;
@@ -137,6 +140,174 @@ class FirebaseService {
     }
 
     throw Exception('No se pudo completar la operacion segura de contrasena.');
+  }
+
+  bool _canUseLocalPasswordRecoveryFallback() {
+    if (kDebugMode) {
+      return true;
+    }
+
+    if (!kIsWeb) {
+      return false;
+    }
+
+    final host = Uri.base.host.toLowerCase();
+    return host == 'localhost' || host == '127.0.0.1' || host == '0.0.0.0';
+  }
+
+  String _generateRecoveryCode() {
+    final random = Random.secure();
+    return random.nextInt(1000000).toString().padLeft(6, '0');
+  }
+
+  Future<QueryDocumentSnapshot<Map<String, dynamic>>?> _findUserDocByEmail(
+    String correo,
+  ) async {
+    final query = await _db
+        .collection('usuarios')
+        .where('correo', isEqualTo: correo)
+        .limit(1)
+        .get();
+
+    if (query.docs.isEmpty) {
+      return null;
+    }
+
+    return query.docs.first;
+  }
+
+  Future<PasswordRecoveryStartResult> _solicitarRecuperacionPasswordEnFirestore(
+    String correo,
+  ) async {
+    final userDoc = await _findUserDocByEmail(correo);
+    if (userDoc == null) {
+      return const PasswordRecoveryStartResult(
+        codeSent: false,
+        requiresSupport: true,
+        message:
+            'No se pudo validar la cuenta solicitada. Verifica el correo o contacta a RRHH o al administrador.',
+      );
+    }
+
+    final data = userDoc.data();
+    final recoveryData = Map<String, dynamic>.from(
+      (data['passwordRecovery'] as Map<String, dynamic>?) ?? const {},
+    );
+    final requestedAt = recoveryData['requestedAt'];
+    final requestedDate = requestedAt is Timestamp ? requestedAt.toDate() : null;
+
+    if (requestedDate != null) {
+      final elapsedSeconds = DateTime.now().difference(requestedDate).inSeconds;
+      if (elapsedSeconds < 60) {
+        final waitSeconds = 60 - elapsedSeconds;
+        throw Exception(
+          'Espera $waitSeconds segundos antes de solicitar un nuevo codigo.',
+        );
+      }
+    }
+
+    final code = _generateRecoveryCode();
+    final codePayload = await _passwordSecurity.hashPassword(code);
+
+    await userDoc.reference.set({
+      'passwordRecovery': {
+        'codeHash': codePayload.hash,
+        'codeSalt': codePayload.salt,
+        'codeAlgorithm': codePayload.algorithm,
+        'codeVersion': codePayload.version,
+        'codeIterations': codePayload.iterations,
+        'requestedAt': FieldValue.serverTimestamp(),
+        'expiresAt': Timestamp.fromDate(
+          DateTime.now().add(
+            const Duration(minutes: _passwordRecoveryExpirationMinutes),
+          ),
+        ),
+        'attempts': 0,
+        'maxAttempts': _passwordRecoveryMaxAttempts,
+        'status': 'pending',
+        'delivery': 'local_debug',
+      },
+      'actualizadoEn': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    return PasswordRecoveryStartResult(
+      codeSent: true,
+      requiresSupport: false,
+      message:
+          'Modo local de recuperacion activado. Usa el codigo temporal $code para continuar. Caduca en $_passwordRecoveryExpirationMinutes minutos.',
+    );
+  }
+
+  Future<void> _confirmarRecuperacionPasswordEnFirestore({
+    required String correo,
+    required String codigo,
+    required String nuevaPassword,
+  }) async {
+    final userDoc = await _findUserDocByEmail(correo);
+    if (userDoc == null) {
+      throw Exception('No se pudo validar la recuperacion solicitada.');
+    }
+
+    final data = userDoc.data();
+    final recoveryData = Map<String, dynamic>.from(
+      (data['passwordRecovery'] as Map<String, dynamic>?) ?? const {},
+    );
+    final codeHash = (recoveryData['codeHash'] ?? '').toString();
+    final codeSalt = (recoveryData['codeSalt'] ?? '').toString();
+    final expiresAtValue = recoveryData['expiresAt'];
+    final expiresAt =
+        expiresAtValue is Timestamp ? expiresAtValue.toDate() : null;
+    final attempts = (recoveryData['attempts'] as num?)?.toInt() ?? 0;
+    final maxAttempts =
+        (recoveryData['maxAttempts'] as num?)?.toInt() ??
+        _passwordRecoveryMaxAttempts;
+
+    if (codeHash.isEmpty || codeSalt.isEmpty || expiresAt == null) {
+      throw Exception('Solicita un nuevo codigo temporal antes de continuar.');
+    }
+
+    if (DateTime.now().isAfter(expiresAt)) {
+      await userDoc.reference.update({'passwordRecovery': FieldValue.delete()});
+      throw Exception('El codigo temporal ya expiro. Solicita uno nuevo.');
+    }
+
+    if (attempts >= maxAttempts) {
+      throw Exception(
+        'Se agotaron los intentos permitidos. Solicita un nuevo codigo temporal.',
+      );
+    }
+
+    final codeIsValid = await _passwordSecurity.verifyPassword(
+      password: codigo,
+      expectedHash: codeHash,
+      salt: codeSalt,
+    );
+
+    if (!codeIsValid) {
+      final nextAttempts = attempts + 1;
+      await userDoc.reference.set({
+        'passwordRecovery': {
+          ...recoveryData,
+          'attempts': nextAttempts,
+          'lastFailedAt': FieldValue.serverTimestamp(),
+        },
+      }, SetOptions(merge: true));
+
+      throw Exception(
+        nextAttempts >= maxAttempts
+            ? 'Se agotaron los intentos permitidos. Solicita un nuevo codigo temporal.'
+            : 'El codigo temporal ingresado no es correcto.',
+      );
+    }
+
+    final passwordPayload = await _crearPayloadPasswordSeguro(nuevaPassword);
+    await userDoc.reference.set({
+      ...passwordPayload,
+      'password': FieldValue.delete(),
+      'passwordRecovery': FieldValue.delete(),
+      'passwordChangedAt': FieldValue.serverTimestamp(),
+      'actualizadoEn': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
   }
 
   Future<void> _cambiarPasswordConActualEnFirestore({
@@ -456,19 +627,31 @@ class FirebaseService {
       throw Exception('Ingrese un correo valido.');
     }
 
-    final response = await _callSecurePasswordFunction(
-      'requestPasswordRecovery',
-      payload: {'correo': correoNormalizado},
-    );
+    try {
+      final response = await _callSecurePasswordFunction(
+        'requestPasswordRecovery',
+        payload: {'correo': correoNormalizado},
+      );
 
-    return PasswordRecoveryStartResult(
-      codeSent: response['delivery'] == 'device',
-      requiresSupport: response['delivery'] != 'device',
-      message:
-          (response['message'] ??
-                  'Si tu cuenta tiene un dispositivo confiable vinculado, recibiras un codigo temporal.')
-              .toString(),
-    );
+      return PasswordRecoveryStartResult(
+        codeSent: response['delivery'] == 'device',
+        requiresSupport: response['delivery'] != 'device',
+        message:
+            (response['message'] ??
+                    'Si tu cuenta tiene un dispositivo confiable vinculado, recibiras un codigo temporal.')
+                .toString(),
+      );
+    } catch (error) {
+      if (!_canUseLocalPasswordRecoveryFallback()) {
+        rethrow;
+      }
+
+      debugPrint(
+        'No se pudo usar la recuperacion segura remota. '
+        'Se aplicara el respaldo local de desarrollo: $error',
+      );
+      return _solicitarRecuperacionPasswordEnFirestore(correoNormalizado);
+    }
   }
 
   Future<void> confirmarRecuperacionPassword({
@@ -490,13 +673,31 @@ class FirebaseService {
 
     _validarPasswordSeguraOrThrow(nuevaPasswordLimpia);
 
-    await _callSecurePasswordFunction(
-      'confirmPasswordRecovery',
-      payload: {
-        'correo': correoNormalizado,
-        'codigo': codigoLimpio,
-        'nuevaPassword': nuevaPasswordLimpia,
-      },
+    try {
+      await _callSecurePasswordFunction(
+        'confirmPasswordRecovery',
+        payload: {
+          'correo': correoNormalizado,
+          'codigo': codigoLimpio,
+          'nuevaPassword': nuevaPasswordLimpia,
+        },
+      );
+      return;
+    } catch (error) {
+      if (!_canUseLocalPasswordRecoveryFallback()) {
+        rethrow;
+      }
+
+      debugPrint(
+        'No se pudo confirmar la recuperacion segura remota. '
+        'Se aplicara el respaldo local de desarrollo: $error',
+      );
+    }
+
+    await _confirmarRecuperacionPasswordEnFirestore(
+      correo: correoNormalizado,
+      codigo: codigoLimpio,
+      nuevaPassword: nuevaPasswordLimpia,
     );
   }
 
@@ -536,12 +737,8 @@ class FirebaseService {
       );
       return;
     } catch (error) {
-      if (!kIsWeb) {
-        rethrow;
-      }
-
       debugPrint(
-        'No se pudo usar la funcion segura de cambio de contrasena en web. '
+        'No se pudo usar la funcion segura de cambio de contrasena. '
         'Se aplicara el respaldo en Firestore: $error',
       );
     }
