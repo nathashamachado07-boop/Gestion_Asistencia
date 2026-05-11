@@ -12,16 +12,12 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
     required this.branding,
     this.nombreUsuario = 'Recursos Humanos',
     this.showBrandLogo = false,
-    this.onCreateDemoData,
-    this.isCreatingDemoData = false,
   });
 
   final String sedeId;
   final AppBranding branding;
   final String nombreUsuario;
   final bool showBrandLogo;
-  final Future<void> Function()? onCreateDemoData;
-  final bool isCreatingDemoData;
 
   Color get _primary => branding.primary;
   Color get _secondary => branding.primary.withOpacity(0.82);
@@ -116,10 +112,6 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
               ],
             ),
           ),
-          if (onCreateDemoData != null) ...[
-            const SizedBox(height: 18),
-            _buildDemoAccessBanner(),
-          ],
           const SizedBox(height: 24),
           Wrap(
             spacing: 18,
@@ -252,102 +244,6 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
               color: Colors.white70,
               fontSize: 11,
               height: 1.4,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDemoAccessBanner() {
-    final demoAccess = switch (sedeId) {
-      SedeAccess.sedeCentroId => (
-          docente: 'andrea.centro@princesadegales.app',
-          administrativo: 'karla.admin.centro@princesadegales.app',
-          password: 'centro1234',
-        ),
-      SedeAccess.sedeCreSerId => (
-          docente: 'lucia.creser@institutocreser.app',
-          administrativo: 'veronica.admin@institutocreser.app',
-          password: 'creser1234',
-        ),
-      _ => (
-          docente: 'camila.norte@princesadegales.app',
-          administrativo: 'daniela.admin@princesadegales.app',
-          password: 'norte1234',
-        ),
-    };
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: _card,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: _primary.withOpacity(0.16)),
-        boxShadow: [
-          BoxShadow(
-            color: _primary.withOpacity(0.08),
-            blurRadius: 18,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Wrap(
-        alignment: WrapAlignment.spaceBetween,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        runSpacing: 12,
-        children: [
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 760),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Credenciales demo para $_sedeNombre',
-                  style: const TextStyle(
-                    color: _ink,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Docente: ${demoAccess.docente}  |  Administrativo: ${demoAccess.administrativo}  |  Clave: ${demoAccess.password}',
-                  style: const TextStyle(
-                    color: _muted,
-                    fontSize: 13,
-                    height: 1.5,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          FilledButton.icon(
-            onPressed: isCreatingDemoData ? null : onCreateDemoData,
-            style: FilledButton.styleFrom(
-              backgroundColor: _primary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-            ),
-            icon: isCreatingDemoData
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.2,
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                    ),
-                  )
-                : const Icon(Icons.person_add_alt_1_rounded),
-            label: Text(
-              isCreatingDemoData
-                  ? 'Creando credenciales...'
-                  : 'Crear credenciales demo',
             ),
           ),
         ],

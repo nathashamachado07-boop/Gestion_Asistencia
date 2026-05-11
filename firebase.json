@@ -2,6 +2,41 @@
   "functions": {
     "source": "functions"
   },
+  "hosting": {
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "/api/requestPasswordRecovery",
+        "function": {
+          "functionId": "requestPasswordRecovery",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "/api/confirmPasswordRecovery",
+        "function": {
+          "functionId": "confirmPasswordRecovery",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "/api/changePasswordWithCurrentPassword",
+        "function": {
+          "functionId": "changePasswordWithCurrentPassword",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  },
   "flutter": {
     "platforms": {
       "android": {

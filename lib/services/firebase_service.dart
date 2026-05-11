@@ -1,11 +1,18 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import '../config/app_config.dart';
 import '../models/solicitud_model.dart';
+import 'password_security_service.dart';
 
 class FirebaseService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final PasswordSecurityService _passwordSecurity = PasswordSecurityService();
+  static const String _functionsRegion = 'us-central1';
 
   // --- COORDENADAS DEL INSTITUTO ---
   static const double latitudInstituto = -0.1843090;
@@ -32,60 +39,265 @@ class FirebaseService {
   }
 
   // --- FUNCIÓN PARA VALIDAR GPS ---
+  String _normalizarCorreo(String correo) {
+    return correo.trim().toLowerCase();
+  }
 
-  // Login: Trae al usuario y su lista de horarios
-  Future<Map<String, dynamic>?> validarLogin(String correo, String password) async {
-  print("Intentando login con: $correo"); // Ver que llega el correo
-  
-  QuerySnapshot userQuery = await _db
-      .collection('usuarios')
-      .where('correo', isEqualTo: correo.trim())
-      .limit(1)
-      .get();
+  Map<String, dynamic> _sanitizarDatosUsuario(Map<String, dynamic> data) {
+    final limpio = Map<String, dynamic>.from(data);
+    limpio.remove('password');
+    limpio.remove('passwordHash');
+    limpio.remove('passwordSalt');
+    limpio.remove('passwordAlgorithm');
+    limpio.remove('passwordVersion');
+    limpio.remove('passwordIterations');
+    return limpio;
+  }
 
-  print("Documentos encontrados: ${userQuery.docs.length}"); // Si sale 0, el correo no coincide
+  Future<Map<String, dynamic>> _crearPayloadPasswordSeguro(
+    String password,
+  ) async {
+    final hash = await _passwordSecurity.hashPassword(password);
+    return hash.toMap();
+  }
 
-  if (userQuery.docs.isNotEmpty) {
-    final doc = userQuery.docs.first;
-    var data = doc.data() as Map<String, dynamic>;
-    print("Password en DB: ${data['password']}");
-    print("Password ingresada: $password");
-    
-    if (data['password'] == password) {
-      return {
-        ...data,
-        'docId': doc.id,
-      };
+  void _validarPasswordSeguraOrThrow(String password) {
+    final validationMessage = PasswordSecurityService.validatePasswordStrength(
+      password,
+    );
+
+    if (validationMessage != null) {
+      throw Exception(validationMessage);
     }
   }
-  return null;
-}
+
+  Uri _buildFunctionUri(String functionName) {
+    final projectId = Firebase.app().options.projectId;
+
+    if (kIsWeb) {
+      final host = Uri.base.host.toLowerCase();
+      final isLocalHost =
+          host == 'localhost' ||
+          host == '127.0.0.1' ||
+          host == '0.0.0.0';
+
+      // In Firebase Hosting we prefer same-origin rewrites to avoid
+      // browser CORS/preflight failures when calling secure functions.
+      if (!isLocalHost) {
+        return Uri(path: '/api/$functionName');
+      }
+    }
+
+    return Uri.https(
+      '$_functionsRegion-$projectId.cloudfunctions.net',
+      '/$functionName',
+    );
+  }
+
+  Future<Map<String, dynamic>> _callSecurePasswordFunction(
+    String functionName, {
+    required Map<String, dynamic> payload,
+  }) async {
+    late final http.Response response;
+
+    try {
+      response = await http.post(
+        _buildFunctionUri(functionName),
+        headers: const {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode(payload),
+      );
+    } catch (_) {
+      throw Exception(
+        'No se pudo conectar con el servicio seguro. Recarga la pagina e intenta nuevamente.',
+      );
+    }
+
+    Map<String, dynamic> body = const {};
+    if (response.body.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic>) {
+          body = decoded;
+        }
+      } catch (_) {
+        body = const {};
+      }
+    }
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return body;
+    }
+
+    final message = (body['message'] ?? '').toString().trim();
+    if (message.isNotEmpty) {
+      throw Exception(message);
+    }
+
+    throw Exception('No se pudo completar la operacion segura de contrasena.');
+  }
+
+  Future<void> _cambiarPasswordConActualEnFirestore({
+    required String correo,
+    required String passwordActual,
+    required String nuevaPassword,
+  }) async {
+    final query = await _db
+        .collection('usuarios')
+        .where('correo', isEqualTo: correo)
+        .limit(1)
+        .get();
+
+    if (query.docs.isEmpty) {
+      throw Exception('No existe un usuario registrado con ese correo.');
+    }
+
+    final userDoc = query.docs.first;
+    final data = userDoc.data();
+    final passwordValida = await _validarPasswordUsuario(
+      userRef: userDoc.reference,
+      data: data,
+      password: passwordActual,
+    );
+
+    if (!passwordValida) {
+      throw Exception('La contrasena actual no es correcta.');
+    }
+
+    final passwordPayload = await _crearPayloadPasswordSeguro(nuevaPassword);
+    await userDoc.reference.update({
+      ...passwordPayload,
+      'password': FieldValue.delete(),
+      'passwordRecovery': FieldValue.delete(),
+      'passwordChangedAt': FieldValue.serverTimestamp(),
+      'actualizadoEn': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<void> _eliminarPasswordLegacy(
+    DocumentReference<Map<String, dynamic>> userRef,
+  ) async {
+    await userRef.update({'password': FieldValue.delete()});
+  }
+
+  Future<void> _migrarPasswordLegacy({
+    required DocumentReference<Map<String, dynamic>> userRef,
+    required String password,
+  }) async {
+    try {
+      final passwordPayload = await _crearPayloadPasswordSeguro(password);
+      await userRef.update({
+        ...passwordPayload,
+        'password': FieldValue.delete(),
+        'actualizadoEn': FieldValue.serverTimestamp(),
+      });
+    } catch (error) {
+      debugPrint(
+        'No se pudo migrar la contrasena legacy del usuario ${userRef.id}: $error',
+      );
+    }
+  }
+
+  Future<bool> _validarPasswordUsuario({
+    required DocumentReference<Map<String, dynamic>> userRef,
+    required Map<String, dynamic> data,
+    required String password,
+  }) async {
+    final hash = (data['passwordHash'] ?? '').toString();
+    final salt = (data['passwordSalt'] ?? '').toString();
+
+    if (hash.isNotEmpty && salt.isNotEmpty) {
+      return _passwordSecurity.verifyPassword(
+        password: password,
+        expectedHash: hash,
+        salt: salt,
+      );
+    }
+
+    final legacyPassword = (data['password'] ?? '').toString();
+    if (legacyPassword.isEmpty || legacyPassword != password) {
+      return false;
+    }
+
+    await _migrarPasswordLegacy(userRef: userRef, password: password);
+    return true;
+  }
+
+  // Login: Trae al usuario y su lista de horarios
+  Future<Map<String, dynamic>?> validarLogin(
+    String correo,
+    String password,
+  ) async {
+    final correoLimpio = _normalizarCorreo(correo);
+    final passwordLimpia = password.trim();
+
+    if (correoLimpio.isEmpty || passwordLimpia.isEmpty) {
+      return null;
+    }
+
+    final userQuery = await _db
+        .collection('usuarios')
+        .where('correo', isEqualTo: correoLimpio)
+        .limit(1)
+        .get();
+
+    if (userQuery.docs.isEmpty) {
+      return null;
+    }
+
+    final doc = userQuery.docs.first;
+    final data = doc.data();
+    final passwordValida = await _validarPasswordUsuario(
+      userRef: doc.reference,
+      data: data,
+      password: passwordLimpia,
+    );
+
+    if (!passwordValida) {
+      return null;
+    }
+
+    return {..._sanitizarDatosUsuario(data), 'docId': doc.id};
+  }
 
   Future<Map<String, dynamic>?> validarLoginPorSede({
     required String correo,
     required String password,
     required String sedeId,
   }) async {
+    final correoLimpio = _normalizarCorreo(correo);
+    final passwordLimpia = password.trim();
+
+    if (correoLimpio.isEmpty || passwordLimpia.isEmpty) {
+      return null;
+    }
+
     final userQuery = await _db
         .collection('usuarios')
-        .where('correo', isEqualTo: correo.trim())
+        .where('correo', isEqualTo: correoLimpio)
         .where('sedeId', isEqualTo: sedeId)
         .limit(1)
         .get();
 
-    if (userQuery.docs.isNotEmpty) {
-      final doc = userQuery.docs.first;
-      final data = doc.data() as Map<String, dynamic>;
-
-      if (data['password'] == password) {
-        return {
-          ...data,
-          'docId': doc.id,
-        };
-      }
+    if (userQuery.docs.isEmpty) {
+      return null;
     }
 
-    return null;
+    final doc = userQuery.docs.first;
+    final data = doc.data();
+    final passwordValida = await _validarPasswordUsuario(
+      userRef: doc.reference,
+      data: data,
+      password: passwordLimpia,
+    );
+
+    if (!passwordValida) {
+      return null;
+    }
+
+    return {..._sanitizarDatosUsuario(data), 'docId': doc.id};
   }
 
   Future<Map<String, dynamic>> _activarSedeEspecial({
@@ -127,97 +339,6 @@ class FirebaseService {
       'sedeId': sedeId,
       'dashboardWeb': sedeId,
     };
-  }
-
-  Future<void> _crearDatosDemoSede({
-    required String sedeId,
-    required String sedeNombre,
-    required String correoDocente,
-    required String correoAdministrativo,
-    required String nombreDocente,
-    required String nombreAdministrativo,
-  }) async {
-    final docenteRef = _db.collection('usuarios').doc('demo_docente_$sedeId');
-    final administrativoRef = _db
-        .collection('usuarios')
-        .doc('demo_administrativo_$sedeId');
-
-    await docenteRef.set({
-      'nombre': nombreDocente,
-      'correo': correoDocente,
-      'password': 'demo1234',
-      'rol': 'Docente',
-      'tipo_horario': 'completo',
-      'horarios_asignados': ['TC_08_16'],
-      'sede': sedeNombre,
-      'sedeId': sedeId,
-      'dashboardWeb': sedeId,
-      'demo': true,
-      'creadoEn': FieldValue.serverTimestamp(),
-      'actualizadoEn': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-
-    await administrativoRef.set({
-      'nombre': nombreAdministrativo,
-      'correo': correoAdministrativo,
-      'password': 'demo1234',
-      'rol': 'Administrativo',
-      'tipo_horario': 'administrativo',
-      'sede': sedeNombre,
-      'sedeId': sedeId,
-      'dashboardWeb': sedeId,
-      'demo': true,
-      'creadoEn': FieldValue.serverTimestamp(),
-      'actualizadoEn': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-
-    await _db.collection('validaciones_sede').doc('demo_$sedeId').set({
-      'sede': sedeNombre,
-      'sedeId': sedeId,
-      'docenteDemoId': docenteRef.id,
-      'administrativoDemoId': administrativoRef.id,
-      'descripcion':
-          'Documento de validacion para comprobar filtros de docentes y administrativos por sede.',
-      'actualizadoEn': FieldValue.serverTimestamp(),
-      'creadoEn': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-  }
-
-  Future<void> _crearUsuariosDemoApp({
-    required String sedeId,
-    required String sedeNombre,
-    required List<Map<String, Object>> usuariosDemo,
-  }) async {
-    for (final usuario in usuariosDemo) {
-      await _db.collection('usuarios').doc(usuario['docId'].toString()).set({
-        'nombre': usuario['nombre'],
-        'correo': usuario['correo'],
-        'password': usuario['password'],
-        'rol': usuario['rol'],
-        'tipo_horario': usuario['tipo_horario'],
-        'horarios_asignados': usuario['horarios_asignados'],
-        'telefono': usuario['telefono'],
-        'sede': sedeNombre,
-        'sedeId': sedeId,
-        'dashboardWeb': sedeId,
-        'especialidad': usuario['especialidad'] ??
-            (usuario['rol'] == 'Docente'
-                ? 'Estetica Integral'
-                : 'Administracion'),
-        'demo': true,
-        'actualizadoEn': FieldValue.serverTimestamp(),
-        'creadoEn': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    }
-
-    await _db.collection('validaciones_sede').doc('app_demo_$sedeId').set({
-      'sede': sedeNombre,
-      'sedeId': sedeId,
-      'usuariosDemo': usuariosDemo.map((e) => e['docId']).toList(),
-      'descripcion': 'Usuarios demo para la aplicacion movil de $sedeNombre.',
-      'actualizadoEn': FieldValue.serverTimestamp(),
-      'creadoEn': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
   }
 
   Future<Map<String, dynamic>> activarSedePrincesaGalesNorte({
@@ -271,186 +392,6 @@ class FirebaseService {
     );
   }
 
-  Future<void> crearDatosDemoSedeNorte() async {
-    await _crearDatosDemoSede(
-      sedeId: 'princesa_gales_norte',
-      sedeNombre: 'Princesa de Gales Norte',
-      correoDocente: 'demo.docente.norte@intesud.test',
-      correoAdministrativo: 'demo.administrativo.norte@intesud.test',
-      nombreDocente: 'Docente Demo Norte',
-      nombreAdministrativo: 'Administrativo Demo Norte',
-    );
-  }
-
-  Future<void> crearDatosDemoSedeCentro() async {
-    await _crearDatosDemoSede(
-      sedeId: 'princesa_gales_centro',
-      sedeNombre: 'Princesa de Gales Centro',
-      correoDocente: 'demo.docente.centro@intesud.test',
-      correoAdministrativo: 'demo.administrativo.centro@intesud.test',
-      nombreDocente: 'Docente Demo Centro',
-      nombreAdministrativo: 'Administrativo Demo Centro',
-    );
-  }
-
-  Future<void> crearDatosDemoSedeCreSer() async {
-    await _crearDatosDemoSede(
-      sedeId: 'instituto_cre_ser',
-      sedeNombre: 'Instituto Cre Ser',
-      correoDocente: 'demo.docente.creser@intesud.test',
-      correoAdministrativo: 'demo.administrativo.creser@intesud.test',
-      nombreDocente: 'Docente Demo Cre Ser',
-      nombreAdministrativo: 'Administrativo Demo Cre Ser',
-    );
-  }
-
-  Future<void> crearUsuariosDemoAppNorte() async {
-    await _crearUsuariosDemoApp(
-      sedeId: 'princesa_gales_norte',
-      sedeNombre: 'Princesa de Gales Norte',
-      usuariosDemo: const [
-      {
-        'docId': 'norte_docente_tp_01',
-        'nombre': 'Camila Andrade Norte',
-        'correo': 'camila.norte@princesadegales.app',
-        'password': 'norte1234',
-        'rol': 'Docente',
-        'tipo_horario': 'medio_tiempo',
-        'horarios_asignados': ['TP_08_10'],
-        'telefono': '0991001001',
-      },
-      {
-        'docId': 'norte_docente_tp_02',
-        'nombre': 'Valeria Mena Norte',
-        'correo': 'valeria.norte@princesadegales.app',
-        'password': 'norte1234',
-        'rol': 'Docente',
-        'tipo_horario': 'medio_tiempo',
-        'horarios_asignados': ['TP_10_12'],
-        'telefono': '0991001002',
-      },
-      {
-        'docId': 'norte_admin_tc_01',
-        'nombre': 'Daniela Paredes Norte',
-        'correo': 'daniela.admin@princesadegales.app',
-        'password': 'norte1234',
-        'rol': 'Administrativo',
-        'tipo_horario': 'completo',
-        'horarios_asignados': ['TC_08_16'],
-        'telefono': '0991001003',
-      },
-      {
-        'docId': 'norte_admin_tc_02',
-        'nombre': 'Paola Jaramillo Norte',
-        'correo': 'paola.admin@princesadegales.app',
-        'password': 'norte1234',
-        'rol': 'Administrativo',
-        'tipo_horario': 'completo',
-        'horarios_asignados': ['TC_08_16'],
-        'telefono': '0991001004',
-      },
-      ],
-    );
-  }
-
-  Future<void> crearUsuariosDemoAppCentro() async {
-    await _crearUsuariosDemoApp(
-      sedeId: 'princesa_gales_centro',
-      sedeNombre: 'Princesa de Gales Centro',
-      usuariosDemo: const [
-        {
-          'docId': 'centro_docente_tp_01',
-          'nombre': 'Andrea Cabrera Centro',
-          'correo': 'andrea.centro@princesadegales.app',
-          'password': 'centro1234',
-          'rol': 'Docente',
-          'tipo_horario': 'medio_tiempo',
-          'horarios_asignados': ['TP_08_10'],
-          'telefono': '0992001001',
-        },
-        {
-          'docId': 'centro_docente_tp_02',
-          'nombre': 'Melissa Vinueza Centro',
-          'correo': 'melissa.centro@princesadegales.app',
-          'password': 'centro1234',
-          'rol': 'Docente',
-          'tipo_horario': 'medio_tiempo',
-          'horarios_asignados': ['TP_10_12'],
-          'telefono': '0992001002',
-        },
-        {
-          'docId': 'centro_admin_tc_01',
-          'nombre': 'Karla Romero Centro',
-          'correo': 'karla.admin.centro@princesadegales.app',
-          'password': 'centro1234',
-          'rol': 'Administrativo',
-          'tipo_horario': 'completo',
-          'horarios_asignados': ['TC_08_16'],
-          'telefono': '0992001003',
-        },
-        {
-          'docId': 'centro_admin_tc_02',
-          'nombre': 'Monica Salazar Centro',
-          'correo': 'monica.admin.centro@princesadegales.app',
-          'password': 'centro1234',
-          'rol': 'Administrativo',
-          'tipo_horario': 'completo',
-          'horarios_asignados': ['TC_08_16'],
-          'telefono': '0992001004',
-        },
-      ],
-    );
-  }
-
-  Future<void> crearUsuariosDemoAppCreSer() async {
-    await _crearUsuariosDemoApp(
-      sedeId: 'instituto_cre_ser',
-      sedeNombre: 'Instituto Cre Ser',
-      usuariosDemo: const [
-        {
-          'docId': 'creser_docente_tp_01',
-          'nombre': 'Lucia Herrera Cre Ser',
-          'correo': 'lucia.creser@institutocreser.app',
-          'password': 'creser1234',
-          'rol': 'Docente',
-          'tipo_horario': 'medio_tiempo',
-          'horarios_asignados': ['TP_08_10'],
-          'telefono': '0993001001',
-        },
-        {
-          'docId': 'creser_docente_tp_02',
-          'nombre': 'Patricia Solis Cre Ser',
-          'correo': 'patricia.creser@institutocreser.app',
-          'password': 'creser1234',
-          'rol': 'Docente',
-          'tipo_horario': 'medio_tiempo',
-          'horarios_asignados': ['TP_10_12'],
-          'telefono': '0993001002',
-        },
-        {
-          'docId': 'creser_admin_tc_01',
-          'nombre': 'Veronica Montalvo Cre Ser',
-          'correo': 'veronica.admin@institutocreser.app',
-          'password': 'creser1234',
-          'rol': 'Administrativo',
-          'tipo_horario': 'completo',
-          'horarios_asignados': ['TC_08_16'],
-          'telefono': '0993001003',
-        },
-        {
-          'docId': 'creser_admin_tc_02',
-          'nombre': 'Diana Merino Cre Ser',
-          'correo': 'diana.admin@institutocreser.app',
-          'password': 'creser1234',
-          'rol': 'Administrativo',
-          'tipo_horario': 'completo',
-          'horarios_asignados': ['TC_08_16'],
-          'telefono': '0993001004',
-        },
-      ],
-    );
-  }
-
   int _horaEnMinutos(String hora) {
     final partes = hora.split(':');
     final horas = int.tryParse(partes[0]) ?? 0;
@@ -459,7 +400,7 @@ class FirebaseService {
   }
 
   Future<Map<String, dynamic>?> _obtenerUsuarioPorCorreo(String correo) async {
-    final correoNormalizado = correo.trim().toLowerCase();
+    final correoNormalizado = _normalizarCorreo(correo);
     if (correoNormalizado.isEmpty) {
       return null;
     }
@@ -474,18 +415,149 @@ class FirebaseService {
       return null;
     }
 
-    return query.docs.first.data() as Map<String, dynamic>;
+    return _sanitizarDatosUsuario(query.docs.first.data());
   }
 
   Future<Map<String, dynamic>?> obtenerUsuarioPorCorreo(String correo) async {
     return _obtenerUsuarioPorCorreo(correo);
   }
 
+  Future<void> registrarAceptacionTerminos({
+    required String userDocId,
+    required String correo,
+    required String version,
+    required String canal,
+  }) async {
+    final docId = userDocId.trim();
+    final correoNormalizado = _normalizarCorreo(correo);
+
+    if (docId.isEmpty || correoNormalizado.isEmpty || version.trim().isEmpty) {
+      return;
+    }
+
+    await _db.collection('usuarios').doc(docId).set({
+      'consentimientoDatos': {
+        'aceptado': true,
+        'correo': correoNormalizado,
+        'version': version.trim(),
+        'canal': canal.trim().isEmpty ? 'desconocido' : canal.trim(),
+        'aceptadoEn': FieldValue.serverTimestamp(),
+      },
+      'actualizadoEn': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Future<PasswordRecoveryStartResult> solicitarRecuperacionPassword({
+    required String correo,
+  }) async {
+    final correoNormalizado = _normalizarCorreo(correo);
+
+    if (correoNormalizado.isEmpty) {
+      throw Exception('Ingrese un correo valido.');
+    }
+
+    final response = await _callSecurePasswordFunction(
+      'requestPasswordRecovery',
+      payload: {'correo': correoNormalizado},
+    );
+
+    return PasswordRecoveryStartResult(
+      codeSent: response['delivery'] == 'device',
+      requiresSupport: response['delivery'] != 'device',
+      message:
+          (response['message'] ??
+                  'Si tu cuenta tiene un dispositivo confiable vinculado, recibiras un codigo temporal.')
+              .toString(),
+    );
+  }
+
+  Future<void> confirmarRecuperacionPassword({
+    required String correo,
+    required String codigo,
+    required String nuevaPassword,
+  }) async {
+    final correoNormalizado = _normalizarCorreo(correo);
+    final codigoLimpio = codigo.trim();
+    final nuevaPasswordLimpia = nuevaPassword.trim();
+
+    if (correoNormalizado.isEmpty) {
+      throw Exception('Ingrese un correo valido.');
+    }
+
+    if (codigoLimpio.length != 6) {
+      throw Exception('Ingrese el codigo temporal de 6 digitos.');
+    }
+
+    _validarPasswordSeguraOrThrow(nuevaPasswordLimpia);
+
+    await _callSecurePasswordFunction(
+      'confirmPasswordRecovery',
+      payload: {
+        'correo': correoNormalizado,
+        'codigo': codigoLimpio,
+        'nuevaPassword': nuevaPasswordLimpia,
+      },
+    );
+  }
+
+  Future<void> cambiarPasswordConActual({
+    required String correo,
+    required String passwordActual,
+    required String nuevaPassword,
+  }) async {
+    final correoNormalizado = _normalizarCorreo(correo);
+    final actualLimpia = passwordActual.trim();
+    final nuevaPasswordLimpia = nuevaPassword.trim();
+
+    if (correoNormalizado.isEmpty) {
+      throw Exception('Ingrese un correo valido.');
+    }
+
+    if (actualLimpia.isEmpty) {
+      throw Exception('Ingrese su contrasena actual.');
+    }
+
+    _validarPasswordSeguraOrThrow(nuevaPasswordLimpia);
+
+    if (actualLimpia == nuevaPasswordLimpia) {
+      throw Exception(
+        'La nueva contrasena debe ser diferente de la contrasena actual.',
+      );
+    }
+
+    try {
+      await _callSecurePasswordFunction(
+        'changePasswordWithCurrentPassword',
+        payload: {
+          'correo': correoNormalizado,
+          'passwordActual': actualLimpia,
+          'nuevaPassword': nuevaPasswordLimpia,
+        },
+      );
+      return;
+    } catch (error) {
+      if (!kIsWeb) {
+        rethrow;
+      }
+
+      debugPrint(
+        'No se pudo usar la funcion segura de cambio de contrasena en web. '
+        'Se aplicara el respaldo en Firestore: $error',
+      );
+    }
+
+    await _cambiarPasswordConActualEnFirestore(
+      correo: correoNormalizado,
+      passwordActual: actualLimpia,
+      nuevaPassword: nuevaPasswordLimpia,
+    );
+  }
+
   Future<void> actualizarPasswordPorCorreo({
     required String correo,
     required String nuevaPassword,
   }) async {
-    final correoNormalizado = correo.trim().toLowerCase();
+    final correoNormalizado = _normalizarCorreo(correo);
     final passwordLimpia = nuevaPassword.trim();
 
     if (correoNormalizado.isEmpty) {
@@ -495,6 +567,8 @@ class FirebaseService {
     if (passwordLimpia.isEmpty) {
       throw Exception('Ingrese una nueva contrasena.');
     }
+
+    _validarPasswordSeguraOrThrow(passwordLimpia);
 
     final query = await _db
         .collection('usuarios')
@@ -506,10 +580,13 @@ class FirebaseService {
       throw Exception('No existe un usuario registrado con ese correo.');
     }
 
-    await query.docs.first.reference.set({
-      'password': passwordLimpia,
+    final passwordPayload = await _crearPayloadPasswordSeguro(passwordLimpia);
+
+    await query.docs.first.reference.update({
+      ...passwordPayload,
+      'password': FieldValue.delete(),
       'actualizadoEn': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    });
   }
 
   bool _esHorarioTiempoCompleto(String idHorario, Map<String, dynamic> data) {
@@ -538,11 +615,13 @@ class FirebaseService {
       return null;
     }
 
-    final inicio =
-        (usuarioData['almuerzo_inicio_asignado'] ?? '').toString().trim();
+    final inicio = (usuarioData['almuerzo_inicio_asignado'] ?? '')
+        .toString()
+        .trim();
     final fin = (usuarioData['almuerzo_fin_asignado'] ?? '').toString().trim();
-    final label =
-        (usuarioData['almuerzo_horario_label'] ?? '').toString().trim();
+    final label = (usuarioData['almuerzo_horario_label'] ?? '')
+        .toString()
+        .trim();
 
     if (inicio.isEmpty || fin.isEmpty) {
       return null;
@@ -647,8 +726,9 @@ class FirebaseService {
       return "No tienes clases programadas en este horario.";
     }
 
-    horariosEvaluados
-        .sort((a, b) => (a['entradaMin'] as int).compareTo(b['entradaMin'] as int));
+    horariosEvaluados.sort(
+      (a, b) => (a['entradaMin'] as int).compareTo(b['entradaMin'] as int),
+    );
 
     final ahoraMin = (ahora.hour * 60) + ahora.minute;
     final primerHorario = horariosEvaluados.first;
@@ -676,6 +756,7 @@ class FirebaseService {
 
     return "No tienes clases programadas en este horario.";
   }
+
   // Marcación: Busca en la lista de la captura con VALIDACIÓN DE ESTADO
   ({int inicio, int fin})? _parseRangoPermisoHoras(String? value) {
     if (value == null || value.trim().isEmpty) {
@@ -752,7 +833,9 @@ class FirebaseService {
       }
 
       final horarioPermiso =
-          (data['horarioPermiso'] ?? data['horasPermiso'] ?? '').toString().trim();
+          (data['horarioPermiso'] ?? data['horasPermiso'] ?? '')
+              .toString()
+              .trim();
       final rango = _parseRangoPermisoHoras(horarioPermiso);
       if (rango == null) {
         continue;
@@ -772,12 +855,11 @@ class FirebaseService {
 
   Future<Map<String, String>> registrarMarcacion({
     required String nombreUsuario,
-    required List<dynamic> listaHorarios, 
+    required List<dynamic> listaHorarios,
     required bool esEntrada,
     String? sedeId,
     String? sedeNombre,
   }) async {
-    
     // await _validarUbicacionGPS(); // Descomentar cuando se requiera GPS real
 
     DateTime ahora = DateTime.now();
@@ -791,18 +873,25 @@ class FirebaseService {
         .get();
 
     if (ultimoRegistroQuery.docs.isNotEmpty) {
-      var ultimoDoc = ultimoRegistroQuery.docs.first.data() as Map<String, dynamic>;
+      var ultimoDoc =
+          ultimoRegistroQuery.docs.first.data() as Map<String, dynamic>;
       String ultimoTipo = ultimoDoc['tipo'] ?? "";
 
       if (esEntrada && ultimoTipo == "ENTRADA") {
-        throw Exception("Ya tienes una ENTRADA activa. Debes marcar SALIDA primero.");
+        throw Exception(
+          "Ya tienes una ENTRADA activa. Debes marcar SALIDA primero.",
+        );
       }
       if (!esEntrada && ultimoTipo == "SALIDA") {
-        throw Exception("Ya marcaste SALIDA. Debes esperar a tu siguiente bloque para entrar.");
+        throw Exception(
+          "Ya marcaste SALIDA. Debes esperar a tu siguiente bloque para entrar.",
+        );
       }
     } else {
       if (!esEntrada) {
-        throw Exception("No puedes marcar SALIDA sin haber registrado una ENTRADA previa.");
+        throw Exception(
+          "No puedes marcar SALIDA sin haber registrado una ENTRADA previa.",
+        );
       }
     }
 
@@ -861,8 +950,9 @@ class FirebaseService {
       );
     }
 
-    String horaOficialStr =
-        esEntrada ? horarioSeleccionado['entrada'] : horarioSeleccionado['salida'];
+    String horaOficialStr = esEntrada
+        ? horarioSeleccionado['entrada']
+        : horarioSeleccionado['salida'];
     int horaLimite = _horaEnMinutos(horaOficialStr);
     String horaActualStr = DateFormat('HH:mm').format(ahora);
 
@@ -884,7 +974,7 @@ class FirebaseService {
       'horario_ref': horarioSeleccionado['nombre'],
       'hora_marcada': horaActualStr,
       'estado': estado,
-      'fecha': ahora, 
+      'fecha': ahora,
       'observacion': "Registro realizado correctamente.",
       'sedeId': sedeId,
       'sede': sedeNombre,
@@ -895,8 +985,8 @@ class FirebaseService {
     });
 
     return {
-      'estado': estado, 
-      'bloque': horarioSeleccionado['nombre'], 
+      'estado': estado,
+      'bloque': horarioSeleccionado['nombre'],
       'hora': horaActualStr,
       'permisoActivo': permisoActivo != null ? 'true' : 'false',
       'horarioPermiso': permisoActivo?['horario'] ?? '',
@@ -904,12 +994,14 @@ class FirebaseService {
     };
   }
 
-  Future<List<Map<String, dynamic>>> obtenerHistorialAsistencias(String nombreDocente) async {
+  Future<List<Map<String, dynamic>>> obtenerHistorialAsistencias(
+    String nombreDocente,
+  ) async {
     try {
       QuerySnapshot snapshot = await _db
           .collection('asistencias_realizadas')
           .where('docente', isEqualTo: nombreDocente)
-          .orderBy('fecha', descending: true) 
+          .orderBy('fecha', descending: true)
           .get();
 
       return snapshot.docs.map((doc) {
@@ -922,7 +1014,9 @@ class FirebaseService {
     }
   }
 
-  Future<List<Map<String, dynamic>>> obtenerHistorialAlmuerzo(String correo) async {
+  Future<List<Map<String, dynamic>>> obtenerHistorialAlmuerzo(
+    String correo,
+  ) async {
     try {
       QuerySnapshot snapshot = await _db
           .collection('registros_almuerzo')
@@ -958,9 +1052,9 @@ class FirebaseService {
   }
 
   Future<Map<String, int>> obtenerEstadisticasDocente(
-  String nombre, {
-  String mes = "Todos",
-}) async {
+    String nombre, {
+    String mes = "Todos",
+  }) async {
     final snapshot = await _db
         .collection('asistencias_realizadas')
         .where('docente', isEqualTo: nombre)
@@ -991,7 +1085,8 @@ class FirebaseService {
 
             if (fecha == null) return false;
             final int numeroMes = _obtenerNumeroMes(mes);
-            return fecha.month == numeroMes && fecha.year == DateTime.now().year;
+            return fecha.month == numeroMes &&
+                fecha.year == DateTime.now().year;
           }).toList();
 
     int total = filtrados.length;
@@ -1054,7 +1149,8 @@ class FirebaseService {
       'almuerzo_horario': horarioAlmuerzo?['label'],
       'almuerzo_inicio_asignado': horarioAlmuerzo?['inicio'],
       'almuerzo_fin_asignado': horarioAlmuerzo?['fin'],
-      'timestamp': FieldValue.serverTimestamp(), // Añadido para mejor ordenamiento
+      'timestamp':
+          FieldValue.serverTimestamp(), // Añadido para mejor ordenamiento
     });
   }
 
@@ -1073,7 +1169,8 @@ class FirebaseService {
       usuarioData = userCheck.docs.first.data() as Map<String, dynamic>;
     }
 
-    var query = await _db.collection('registros_almuerzo')
+    var query = await _db
+        .collection('registros_almuerzo')
         .where('correo_usuario', isEqualTo: correo)
         .where('fecha', isEqualTo: fechaHoy)
         .where('estado', isEqualTo: "en_almuerzo")
@@ -1108,17 +1205,18 @@ class FirebaseService {
     try {
       final solicitudesRef = _db.collection('solicitudes');
       final nuevaSolicitudRef = solicitudesRef.doc();
-      final usaFlujoMatriz =
-          MatrizApprovalFlow.appliesToSedeId(solicitud.sedeId);
+      final usaFlujoMatriz = MatrizApprovalFlow.appliesToSedeId(
+        solicitud.sedeId,
+      );
       final tipoSolicitud = _resolverTipoSolicitud(solicitud.tipo);
       final sedeSolicitud = _resolverSedeSolicitud(solicitud.sedeId);
-      final siguienteNumero =
-          await _obtenerSiguienteNumeroFormularioPorTipo(
+      final siguienteNumero = await _obtenerSiguienteNumeroFormularioPorTipo(
         tipoSolicitud: tipoSolicitud,
         sedeId: sedeSolicitud,
       );
-      final numeroFormularioGenerado =
-          _formatearNumeroFormulario(siguienteNumero);
+      final numeroFormularioGenerado = _formatearNumeroFormulario(
+        siguienteNumero,
+      );
 
       await nuevaSolicitudRef.set({
         ...solicitud.toMap(),
@@ -1221,7 +1319,9 @@ class FirebaseService {
 
   DateTime _resolverFechaOrdenSolicitud(Map<String, dynamic> data) {
     final fecha =
-        data['fecha_solicitud'] ?? data['fechaSolicitud'] ?? data['fechaInicio'];
+        data['fecha_solicitud'] ??
+        data['fechaSolicitud'] ??
+        data['fechaInicio'];
 
     if (fecha is Timestamp) {
       return fecha.toDate();
@@ -1321,13 +1421,12 @@ class FirebaseService {
           transaction.update(solicitudRef, {
             'estado': nuevoEstado,
             'fecha_resolucion': FieldValue.serverTimestamp(),
-            'resueltoPorEmail': normalizedEmail.isEmpty ? null : normalizedEmail,
+            'resueltoPorEmail': normalizedEmail.isEmpty
+                ? null
+                : normalizedEmail,
             'resueltoPorNombre': reviewerName,
           });
-          solicitudFinal = {
-            ...data,
-            'estado': nuevoEstado,
-          };
+          solicitudFinal = {...data, 'estado': nuevoEstado};
           debeNotificarAprobacion = nuevoEstado == 'aprobado';
           return;
         }
@@ -1337,9 +1436,8 @@ class FirebaseService {
           throw Exception('La solicitud ya fue procesada anteriormente.');
         }
 
-        final etapaActual = SedeAccess.normalize(
-          data['etapaAprobacion'],
-        ).isEmpty
+        final etapaActual =
+            SedeAccess.normalize(data['etapaAprobacion']).isEmpty
             ? MatrizApprovalFlow.stagePrimary
             : SedeAccess.normalize(data['etapaAprobacion']);
 
@@ -1395,14 +1493,18 @@ class FirebaseService {
           'estado': nuevoEstado,
           'flujoAprobacion': MatrizApprovalFlow.flowId,
           'etapaAprobacion': MatrizApprovalFlow.stageCompleted,
-          'aprobadoFinalPorEmail':
-              nuevoEstado == 'aprobado' ? normalizedEmail : null,
-          'aprobadoFinalPorNombre':
-              nuevoEstado == 'aprobado' ? reviewerName : null,
-          'rechazadoFinalPorEmail':
-              nuevoEstado == 'aprobado' ? null : normalizedEmail,
-          'rechazadoFinalPorNombre':
-              nuevoEstado == 'aprobado' ? null : reviewerName,
+          'aprobadoFinalPorEmail': nuevoEstado == 'aprobado'
+              ? normalizedEmail
+              : null,
+          'aprobadoFinalPorNombre': nuevoEstado == 'aprobado'
+              ? reviewerName
+              : null,
+          'rechazadoFinalPorEmail': nuevoEstado == 'aprobado'
+              ? null
+              : normalizedEmail,
+          'rechazadoFinalPorNombre': nuevoEstado == 'aprobado'
+              ? null
+              : reviewerName,
           'fecha_resolucion': FieldValue.serverTimestamp(),
         });
         solicitudFinal = {
@@ -1448,31 +1550,26 @@ class FirebaseService {
         .where('rol', whereIn: const ['RRHH', 'Admin'])
         .get();
 
-    return snapshot.docs
-        .map((doc) => {
-              ...doc.data(),
-              'docId': doc.id,
-            })
-        .where((data) {
-          final correo = MatrizApprovalFlow.normalizeEmail(data['correo']);
-          if (correo.isEmpty) {
-            return false;
-          }
+    return snapshot.docs.map((doc) => {...doc.data(), 'docId': doc.id}).where((
+      data,
+    ) {
+      final correo = MatrizApprovalFlow.normalizeEmail(data['correo']);
+      if (correo.isEmpty) {
+        return false;
+      }
 
-          if (sedeId == SedeAccess.matrizId) {
-            if (etapa == MatrizApprovalFlow.stagePrimary) {
-              return MatrizApprovalFlow.isPrimaryReviewer(correo);
-            }
-            if (etapa == MatrizApprovalFlow.stageFinal) {
-              return MatrizApprovalFlow.isFinalReviewer(correo);
-            }
-          }
+      if (sedeId == SedeAccess.matrizId) {
+        if (etapa == MatrizApprovalFlow.stagePrimary) {
+          return MatrizApprovalFlow.isPrimaryReviewer(correo);
+        }
+        if (etapa == MatrizApprovalFlow.stageFinal) {
+          return MatrizApprovalFlow.isFinalReviewer(correo);
+        }
+      }
 
-          final sedesPermitidas =
-              MatrizApprovalFlow.allowedSedeIdsForUser(data);
-          return sedesPermitidas.contains(sedeId);
-        })
-        .toList();
+      final sedesPermitidas = MatrizApprovalFlow.allowedSedeIdsForUser(data);
+      return sedesPermitidas.contains(sedeId);
+    }).toList();
   }
 
   Future<void> _crearAvisosNuevaSolicitudRRHH({
@@ -1641,8 +1738,10 @@ class FirebaseService {
               ? snapshot.docs.first
               : throw StateError('Sin coincidencias'),
         );
-        correoDestino =
-            (match.data()['correo'] ?? '').toString().trim().toLowerCase();
+        correoDestino = (match.data()['correo'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
       } catch (_) {
         correoDestino = '';
       }
@@ -1652,11 +1751,15 @@ class FirebaseService {
       return;
     }
 
-    final tipoSolicitud =
-        (solicitudData['tipo'] ?? 'solicitud').toString().trim();
-    final numeroFormulario =
-        (solicitudData['numFormulario'] ?? '').toString().trim();
-    final aprobador = (reviewerName ?? reviewerEmail ?? 'RRHH').toString().trim();
+    final tipoSolicitud = (solicitudData['tipo'] ?? 'solicitud')
+        .toString()
+        .trim();
+    final numeroFormulario = (solicitudData['numFormulario'] ?? '')
+        .toString()
+        .trim();
+    final aprobador = (reviewerName ?? reviewerEmail ?? 'RRHH')
+        .toString()
+        .trim();
     final titulo = 'Solicitud aprobada';
     final mensaje = numeroFormulario.isEmpty
         ? 'Tu solicitud de $tipoSolicitud fue aprobada por $aprobador.'
@@ -1692,8 +1795,9 @@ class FirebaseService {
     final userRef = _db.collection('usuarios').doc(usuarioDocId);
     final userSnapshot = await userRef.get();
     final actual = userSnapshot.data() as Map<String, dynamic>? ?? {};
-    final horarioAnterior =
-        (actual['almuerzo_horario_label'] ?? '').toString().trim();
+    final horarioAnterior = (actual['almuerzo_horario_label'] ?? '')
+        .toString()
+        .trim();
     final nuevoHorario = '$horaInicio a $horaFin';
 
     await userRef.set({
@@ -1803,6 +1907,10 @@ class FirebaseService {
       throw Exception('Ingrese la contraseña del colaborador.');
     }
 
+    if (passwordLimpio.isNotEmpty) {
+      _validarPasswordSeguraOrThrow(passwordLimpio);
+    }
+
     if (horarioLimpio.isEmpty) {
       throw Exception('Ingrese el horario asignado.');
     }
@@ -1839,10 +1947,10 @@ class FirebaseService {
       'especialidad': especialidadLimpia.isNotEmpty
           ? especialidadLimpia
           : (UserRoleAccess.isAdministrativeRole(rolLimpio) ||
-                  UserRoleAccess.isAdminRole(rolLimpio) ||
-                  UserRoleAccess.isRrhhRole(rolLimpio)
-              ? 'Administracion'
-              : 'Docencia'),
+                    UserRoleAccess.isAdminRole(rolLimpio) ||
+                    UserRoleAccess.isRrhhRole(rolLimpio)
+                ? 'Administracion'
+                : 'Docencia'),
       'sede': SedeAccess.displayNameForId(sedeId),
       'sedeId': sedeId,
       'dashboardWeb': sedeId,
@@ -1850,7 +1958,7 @@ class FirebaseService {
     };
 
     if (passwordLimpio.isNotEmpty) {
-      payload['password'] = passwordLimpio;
+      payload.addAll(await _crearPayloadPasswordSeguro(passwordLimpio));
     }
 
     if (esNuevo) {
@@ -1871,6 +1979,10 @@ class FirebaseService {
     }
 
     await ref.set(payload, SetOptions(merge: true));
+
+    if (passwordLimpio.isNotEmpty) {
+      await _eliminarPasswordLegacy(ref);
+    }
   }
 
   Future<void> eliminarUsuarioPersonalSede({
@@ -1886,7 +1998,9 @@ class FirebaseService {
     final data = snapshot.data() as Map<String, dynamic>? ?? {};
     final rol = (data['rol'] ?? '').toString().trim().toUpperCase();
     if (rol == 'RRHH') {
-      throw Exception('No se puede eliminar un usuario RRHH desde este apartado.');
+      throw Exception(
+        'No se puede eliminar un usuario RRHH desde este apartado.',
+      );
     }
 
     await ref.delete();
@@ -1931,34 +2045,53 @@ class FirebaseService {
       'tokenActualizadoEn': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }
-Future<List<Solicitud>> obtenerMisSolicitdes(String nombre) async {
-  try {
-    QuerySnapshot snapshot = await _db.collection('solicitudes')
-        .where('colaborador', isEqualTo: nombre)
-        .get();
 
-    return snapshot.docs.map((doc) => 
-      Solicitud.fromMap(doc.id, doc.data() as Map<String, dynamic>)).toList();
-  } catch (e) {
-    print("Error al obtener solicitudes: $e");
-    return [];
+  Future<List<Solicitud>> obtenerMisSolicitdes(String nombre) async {
+    try {
+      QuerySnapshot snapshot = await _db
+          .collection('solicitudes')
+          .where('colaborador', isEqualTo: nombre)
+          .get();
+
+      return snapshot.docs
+          .map(
+            (doc) =>
+                Solicitud.fromMap(doc.id, doc.data() as Map<String, dynamic>),
+          )
+          .toList();
+    } catch (e) {
+      print("Error al obtener solicitudes: $e");
+      return [];
+    }
   }
-}
 
-// Obtener estado actual del almuerzo
+  // Obtener estado actual del almuerzo
   Future<String> obtenerEstadoAlmuerzoHoy(String correo) async {
     String fechaHoy = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    var query = await _db.collection('registros_almuerzo')
+    var query = await _db
+        .collection('registros_almuerzo')
         .where('correo_usuario', isEqualTo: correo)
         .where('fecha', isEqualTo: fechaHoy)
         .get();
 
     if (query.docs.isEmpty) return "pendiente";
-    
+
     for (var doc in query.docs) {
       if (doc['estado'] == "en_almuerzo") return "en_almuerzo";
     }
-    
+
     return "finalizado";
   }
+}
+
+class PasswordRecoveryStartResult {
+  const PasswordRecoveryStartResult({
+    required this.codeSent,
+    required this.requiresSupport,
+    required this.message,
+  });
+
+  final bool codeSent;
+  final bool requiresSupport;
+  final String message;
 }

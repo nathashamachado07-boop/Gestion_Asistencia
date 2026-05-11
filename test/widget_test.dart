@@ -12,5 +12,6 @@ void main() {
     expect(find.text('Bienvenido'), findsOneWidget);
     expect(find.text('Correo institucional'), findsOneWidget);
     expect(find.text('INICIAR SESION'), findsOneWidget);
+    expect(find.textContaining('He leido y acepto'), findsOneWidget);
   });
 }

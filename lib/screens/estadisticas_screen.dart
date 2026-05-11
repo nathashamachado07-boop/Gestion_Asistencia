@@ -182,6 +182,10 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isWebLayout) {
+      return _buildWebLayout();
+    }
+
     return Scaffold(
       backgroundColor:
           _isWebLayout ? Colors.white : _branding.background,
@@ -452,6 +456,379 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWebLayout() {
+    return Container(
+      color: const Color(0xFFF4F7F8),
+      child: FutureBuilder<Map<String, int>>(
+        future: _estadisticasFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return Center(
+              child: CircularProgressIndicator(color: _branding.primary),
+            );
+          }
+          if (snapshot.hasError || !snapshot.hasData) {
+            return const Center(child: Text('Error al cargar datos'));
+          }
+
+          final data = snapshot.data!;
+
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(28),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1080),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final bool twoColumns = constraints.maxWidth >= 900;
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Wrap(
+                          spacing: 14,
+                          runSpacing: 14,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          alignment: WrapAlignment.spaceBetween,
+                          children: [
+                            SizedBox(
+                              width: twoColumns ? 460 : constraints.maxWidth,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Resumen general',
+                                    style: TextStyle(
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.w800,
+                                      color: Color(0xFF243435),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    'Consulta tus registros del periodo seleccionado y exporta el reporte en PDF.',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      height: 1.45,
+                                      color: Colors.black.withOpacity(0.60),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            SizedBox(
+                              width: twoColumns ? 220 : constraints.maxWidth,
+                              child: _buildWebFilterCard(),
+                            ),
+                            SizedBox(
+                              width: twoColumns ? 240 : constraints.maxWidth,
+                              child: ElevatedButton.icon(
+                                onPressed: () => _generarPDF(data),
+                                icon: const Icon(
+                                  Icons.picture_as_pdf_rounded,
+                                  color: Colors.white,
+                                ),
+                                label: const Text(
+                                  'Exportar PDF',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: _branding.primary,
+                                  elevation: 0,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 18,
+                                    vertical: 18,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(18),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 24),
+                        if (twoColumns)
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                flex: 3,
+                                child: _buildWebChartPanel(data),
+                              ),
+                              const SizedBox(width: 18),
+                              Expanded(
+                                flex: 2,
+                                child: Column(
+                                  children: [
+                                    _buildWebStatHighlight(
+                                      'Total registros',
+                                      '${data['Total']}',
+                                      Icons.list_alt_rounded,
+                                      _branding.primary,
+                                    ),
+                                    const SizedBox(height: 16),
+                                    _buildWebStatHighlight(
+                                      'Asistencias puntuales',
+                                      '${data['Puntual']}',
+                                      Icons.check_circle_rounded,
+                                      Colors.green,
+                                    ),
+                                    const SizedBox(height: 16),
+                                    _buildWebStatHighlight(
+                                      'Atrasos',
+                                      '${data['Atraso']}',
+                                      Icons.schedule_rounded,
+                                      Colors.orange,
+                                    ),
+                                    const SizedBox(height: 16),
+                                    _buildWebStatHighlight(
+                                      'Salidas anticipadas',
+                                      '${data['Salida Anticipada']}',
+                                      Icons.logout_rounded,
+                                      Colors.redAccent,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          )
+                        else
+                          Column(
+                            children: [
+                              _buildWebChartPanel(data),
+                              const SizedBox(height: 18),
+                              _buildWebStatHighlight(
+                                'Total registros',
+                                '${data['Total']}',
+                                Icons.list_alt_rounded,
+                                _branding.primary,
+                              ),
+                              const SizedBox(height: 14),
+                              _buildWebStatHighlight(
+                                'Asistencias puntuales',
+                                '${data['Puntual']}',
+                                Icons.check_circle_rounded,
+                                Colors.green,
+                              ),
+                              const SizedBox(height: 14),
+                              _buildWebStatHighlight(
+                                'Atrasos',
+                                '${data['Atraso']}',
+                                Icons.schedule_rounded,
+                                Colors.orange,
+                              ),
+                              const SizedBox(height: 14),
+                              _buildWebStatHighlight(
+                                'Salidas anticipadas',
+                                '${data['Salida Anticipada']}',
+                                Icons.logout_rounded,
+                                Colors.redAccent,
+                              ),
+                            ],
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildWebFilterCard() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _branding.primary.withOpacity(0.12)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: DropdownButton<String>(
+        value: _mesSeleccionado,
+        isExpanded: true,
+        underline: const SizedBox(),
+        borderRadius: BorderRadius.circular(18),
+        items: _meses
+            .map(
+              (mes) => DropdownMenuItem(
+                value: mes,
+                child: Text(mes),
+              ),
+            )
+            .toList(),
+        onChanged: (value) {
+          setState(() {
+            _mesSeleccionado = value!;
+            _cargarDatos();
+          });
+        },
+      ),
+    );
+  }
+
+  Widget _buildWebChartPanel(Map<String, int> data) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(28),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Rendimiento de asistencia',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF243435),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Distribucion de puntualidad, atrasos y salidas anticipadas.',
+            style: TextStyle(
+              fontSize: 13,
+              height: 1.4,
+              color: Colors.black.withOpacity(0.58),
+            ),
+          ),
+          const SizedBox(height: 22),
+          SizedBox(
+            height: 260,
+            child: PieChart(
+              PieChartData(
+                sections: [
+                  _sectionData(
+                    data['Puntual'],
+                    Colors.green,
+                    'Puntual',
+                  ),
+                  _sectionData(
+                    data['Atraso'],
+                    Colors.orange,
+                    'Atraso',
+                  ),
+                  _sectionData(
+                    data['Salida Anticipada'],
+                    Colors.redAccent,
+                    'Salida',
+                  ),
+                ],
+                sectionsSpace: 4,
+                centerSpaceRadius: 54,
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _buildLegendChip(
+                'Puntuales',
+                Colors.green,
+                '${data['Puntual']}',
+              ),
+              _buildLegendChip(
+                'Atrasos',
+                Colors.orange,
+                '${data['Atraso']}',
+              ),
+              _buildLegendChip(
+                'Salida anticipada',
+                Colors.redAccent,
+                '${data['Salida Anticipada']}',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWebStatHighlight(
+    String titulo,
+    String valor,
+    IconData icono,
+    Color color,
+  ) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Icon(icono, color: color),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  titulo,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black.withOpacity(0.55),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  valor,
+                  style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w800,
+                    color: color,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),

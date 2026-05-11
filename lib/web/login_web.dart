@@ -1,20 +1,15 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
 
 import '../config/app_config.dart';
 import '../models/app_branding.dart';
 import '../screens/registro_asistencia_screen.dart';
 import '../services/firebase_service.dart';
-import 'web_storage_stub.dart'
-    if (dart.library.html) 'web_storage_web.dart';
+import '../widgets/legal_documents.dart';
+import 'web_storage_stub.dart' if (dart.library.html) 'web_storage_web.dart';
 import 'admin_layout.dart';
 
 class LoginWeb extends StatefulWidget {
-  const LoginWeb({
-    super.key,
-    this.appConfig = AppConfig.matriz,
-  });
+  const LoginWeb({super.key, this.appConfig = AppConfig.matriz});
 
   final AppConfig appConfig;
 
@@ -30,17 +25,14 @@ class _LoginWebState extends State<LoginWeb> {
   final TextEditingController _correoController = TextEditingController();
   final TextEditingController _passController = TextEditingController();
   final FirebaseService _service = FirebaseService();
-  final Random _random = Random();
 
   bool _cargando = false;
   bool _recordarme = false;
   bool _mostrarPassword = false;
+  bool _aceptaTerminos = false;
 
-  String? _codigoRecuperacion;
-  String? _correoRecuperacion;
-  DateTime? _expiracionCodigo;
-
-  AppBranding get _branding => AppBranding.matriz;
+  AppBranding get _branding =>
+      AppBranding.fromSedeId(widget.appConfig.defaultSedeId);
 
   @override
   void initState() {
@@ -62,7 +54,7 @@ class _LoginWebState extends State<LoginWeb> {
     }
 
     _correoController.text = webStorageGet(_storageCorreo) ?? '';
-    _passController.text = webStorageGet(_storagePassword) ?? '';
+    webStorageRemove(_storagePassword);
     _recordarme = true;
   }
 
@@ -71,7 +63,7 @@ class _LoginWebState extends State<LoginWeb> {
 
     if (_recordarme) {
       webStorageSet(_storageCorreo, _correoController.text.trim());
-      webStorageSet(_storagePassword, _passController.text);
+      webStorageRemove(_storagePassword);
     } else {
       webStorageRemove(_storageCorreo);
       webStorageRemove(_storagePassword);
@@ -79,11 +71,14 @@ class _LoginWebState extends State<LoginWeb> {
     }
   }
 
-  String _generarCodigoRecuperacion() {
-    return List.generate(6, (_) => _random.nextInt(10)).join();
-  }
-
   Future<void> _iniciarSesionWeb() async {
+    if (!_aceptaTerminos) {
+      _mostrarError(
+        'Debe aceptar los terminos y la politica de datos antes de iniciar sesion.',
+      );
+      return;
+    }
+
     setState(() => _cargando = true);
 
     final datosUsuario = await _service.validarLogin(
@@ -98,18 +93,15 @@ class _LoginWebState extends State<LoginWeb> {
       return;
     }
 
-    _guardarCredencialesRecordadas();
-
-    final rol = (datosUsuario['rol'] ?? '').toString().trim().toUpperCase();
+    await _registrarAceptacionLegal(datosUsuario);
     if (!mounted) return;
+    _guardarCredencialesRecordadas();
 
     if (UserRoleAccess.canUseAdminPanel(datosUsuario)) {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (context) => AdminLayout(
-            userData: datosUsuario,
-          ),
+          builder: (context) => AdminLayout(userData: datosUsuario),
         ),
       );
       return;
@@ -121,14 +113,14 @@ class _LoginWebState extends State<LoginWeb> {
     }
 
     final nombre = (datosUsuario['nombre'] ?? 'Usuario').toString();
-    final correo =
-        (datosUsuario['correo'] ?? _correoController.text.trim()).toString();
+    final correo = (datosUsuario['correo'] ?? _correoController.text.trim())
+        .toString();
     final sedeId = SedeAccess.resolveSedeId(datosUsuario);
     final listaHorarios =
         (datosUsuario['horarios_asignados'] is List &&
-                (datosUsuario['horarios_asignados'] as List).isNotEmpty)
-            ? List<String>.from(datosUsuario['horarios_asignados'])
-            : <String>['Sin horario asignado'];
+            (datosUsuario['horarios_asignados'] as List).isNotEmpty)
+        ? List<String>.from(datosUsuario['horarios_asignados'])
+        : <String>['Sin horario asignado'];
 
     Navigator.pushReplacement(
       context,
@@ -144,377 +136,63 @@ class _LoginWebState extends State<LoginWeb> {
   }
 
   Future<void> _abrirRecuperacionContrasena() async {
-    final correoController = TextEditingController(
-      text: _correoController.text.trim(),
-    );
-    final codigoController = TextEditingController();
-    final nuevaPasswordController = TextEditingController();
-    final confirmarPasswordController = TextEditingController();
-
-    bool generandoCodigo = false;
-    bool guardandoPassword = false;
-    bool mostrarNuevaPassword = false;
-    bool mostrarConfirmarPassword = false;
-    String codigoTemporalVisible = '';
-    String mensajeAyuda =
-        'Ingrese su correo registrado para generar un codigo temporal de recuperacion.';
-
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            Future<void> generarCodigo() async {
-              final correo = correoController.text.trim().toLowerCase();
-              if (correo.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Ingrese el correo del usuario.'),
-                    backgroundColor: Colors.redAccent,
-                  ),
-                );
-                return;
-              }
-
-              setDialogState(() => generandoCodigo = true);
-
-              try {
-                final usuario = await _service.obtenerUsuarioPorCorreo(correo);
-                if (usuario == null) {
-                  throw Exception(
-                    'No existe un usuario registrado con ese correo.',
-                  );
-                }
-
-                final codigo = _generarCodigoRecuperacion();
-                _codigoRecuperacion = codigo;
-                _correoRecuperacion = correo;
-                _expiracionCodigo = DateTime.now().add(
-                  const Duration(minutes: 10),
-                );
-
-                codigoTemporalVisible = codigo;
-                mensajeAyuda =
-                    'Codigo temporal generado. En esta instalacion aun no hay un servicio de correo configurado, por eso el codigo se muestra aqui para completar la recuperacion en la web.';
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('$e'.replaceAll('Exception: ', '')),
-                    backgroundColor: Colors.redAccent,
-                  ),
-                );
-              } finally {
-                setDialogState(() => generandoCodigo = false);
-              }
-            }
-
-            Future<void> actualizarPassword() async {
-              final correo = correoController.text.trim().toLowerCase();
-              final codigo = codigoController.text.trim();
-              final nuevaPassword = nuevaPasswordController.text.trim();
-              final confirmarPassword =
-                  confirmarPasswordController.text.trim();
-
-              if (correo.isEmpty ||
-                  codigo.isEmpty ||
-                  nuevaPassword.isEmpty ||
-                  confirmarPassword.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Complete todos los campos de recuperacion.'),
-                    backgroundColor: Colors.redAccent,
-                  ),
-                );
-                return;
-              }
-
-              if (_codigoRecuperacion == null ||
-                  _correoRecuperacion == null ||
-                  _expiracionCodigo == null) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Primero debe generar un codigo temporal.'),
-                    backgroundColor: Colors.redAccent,
-                  ),
-                );
-                return;
-              }
-
-              if (_correoRecuperacion != correo) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'El correo no coincide con el codigo generado.',
-                    ),
-                    backgroundColor: Colors.redAccent,
-                  ),
-                );
-                return;
-              }
-
-              if (DateTime.now().isAfter(_expiracionCodigo!)) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'El codigo temporal ya expiro. Genere uno nuevo.',
-                    ),
-                    backgroundColor: Colors.redAccent,
-                  ),
-                );
-                return;
-              }
-
-              if (_codigoRecuperacion != codigo) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('El codigo ingresado no es correcto.'),
-                    backgroundColor: Colors.redAccent,
-                  ),
-                );
-                return;
-              }
-
-              if (nuevaPassword != confirmarPassword) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Las contrasenas no coinciden.'),
-                    backgroundColor: Colors.redAccent,
-                  ),
-                );
-                return;
-              }
-
-              setDialogState(() => guardandoPassword = true);
-
-              try {
-                await _service.actualizarPasswordPorCorreo(
-                  correo: correo,
-                  nuevaPassword: nuevaPassword,
-                );
-
-                if (_recordarme &&
-                    _correoController.text.trim().toLowerCase() == correo) {
-                  _passController.text = nuevaPassword;
-                  _guardarCredencialesRecordadas();
-                }
-
-                if (_correoController.text.trim().toLowerCase() == correo) {
-                  _passController.text = nuevaPassword;
-                }
-
-                if (!context.mounted) return;
-                Navigator.pop(context);
-                _mostrarInfo(
-                  'Contrasena actualizada correctamente. Ya puede iniciar sesion con la nueva clave.',
-                );
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('$e'.replaceAll('Exception: ', '')),
-                    backgroundColor: Colors.redAccent,
-                  ),
-                );
-              } finally {
-                setDialogState(() => guardandoPassword = false);
-              }
-            }
-
-            return AlertDialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(26),
-              ),
-              title: Text(
-                'Recuperar contrasena',
-                style: TextStyle(
-                  color: _branding.primaryDark,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              content: SizedBox(
-                width: 460,
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        mensajeAyuda,
-                        style: TextStyle(
-                          color: Colors.black.withOpacity(0.62),
-                          height: 1.45,
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      TextField(
-                        controller: correoController,
-                        decoration: _inputDecoration(
-                          hintText: 'Correo registrado',
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: generandoCodigo ? null : generarCodigo,
-                          icon: generandoCodigo
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Icon(Icons.mark_email_read_outlined),
-                          label: Text(
-                            generandoCodigo
-                                ? 'Generando codigo...'
-                                : 'Generar codigo',
-                          ),
-                        ),
-                      ),
-                      if (codigoTemporalVisible.isNotEmpty) ...[
-                        const SizedBox(height: 16),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: _branding.surface.withOpacity(0.9),
-                            borderRadius: BorderRadius.circular(18),
-                            border: Border.all(
-                              color: _branding.primary.withOpacity(0.14),
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Codigo temporal',
-                                style: TextStyle(
-                                  color: _branding.primaryDark,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              SelectableText(
-                                codigoTemporalVisible,
-                                style: TextStyle(
-                                  color: _branding.primary,
-                                  fontSize: 24,
-                                  letterSpacing: 4,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                'Valido por 10 minutos.',
-                                style: TextStyle(
-                                  color: Colors.black.withOpacity(0.55),
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        TextField(
-                          controller: codigoController,
-                          decoration: _inputDecoration(
-                            hintText: 'Ingresa el codigo',
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: nuevaPasswordController,
-                          obscureText: !mostrarNuevaPassword,
-                          decoration: _inputDecoration(
-                            hintText: 'Nueva contrasena',
-                            suffixIcon: IconButton(
-                              onPressed: () {
-                                setDialogState(() {
-                                  mostrarNuevaPassword = !mostrarNuevaPassword;
-                                });
-                              },
-                              icon: Icon(
-                                mostrarNuevaPassword
-                                    ? Icons.visibility_outlined
-                                    : Icons.visibility_off_outlined,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: confirmarPasswordController,
-                          obscureText: !mostrarConfirmarPassword,
-                          decoration: _inputDecoration(
-                            hintText: 'Confirmar contrasena',
-                            suffixIcon: IconButton(
-                              onPressed: () {
-                                setDialogState(() {
-                                  mostrarConfirmarPassword =
-                                      !mostrarConfirmarPassword;
-                                });
-                              },
-                              icon: Icon(
-                                mostrarConfirmarPassword
-                                    ? Icons.visibility_outlined
-                                    : Icons.visibility_off_outlined,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Cerrar'),
-                ),
-                FilledButton(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: _branding.primary,
-                  ),
-                  onPressed: guardandoPassword || codigoTemporalVisible.isEmpty
-                      ? null
-                      : actualizarPassword,
-                  child: guardandoPassword
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Text('Cambiar contrasena'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+    final result = await showPasswordRecoveryDialog(
+      context,
+      branding: _branding,
+      service: _service,
+      initialEmail: _correoController.text,
     );
 
-    correoController.dispose();
-    codigoController.dispose();
-    nuevaPasswordController.dispose();
-    confirmarPasswordController.dispose();
+    if (result == null || !mounted) return;
+
+    _correoController.text = result.correo;
+    _passController.text = result.nuevaPassword;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text(
+          'Contrasena actualizada correctamente. Ya puedes iniciar sesion con la nueva clave.',
+        ),
+        backgroundColor: _branding.primary,
+      ),
+    );
+  }
+
+  Future<void> _mostrarTerminosYPrivacidad() async {
+    await showLegalDocumentsDialog(
+      context,
+      branding: _branding,
+      appName: widget.appConfig.appName,
+    );
+  }
+
+  Future<void> _registrarAceptacionLegal(
+    Map<String, dynamic> datosUsuario,
+  ) async {
+    final userDocId = (datosUsuario['docId'] ?? '').toString().trim();
+    final correo = (datosUsuario['correo'] ?? _correoController.text.trim())
+        .toString();
+
+    if (userDocId.isEmpty || correo.trim().isEmpty) {
+      return;
+    }
+
+    try {
+      await _service.registrarAceptacionTerminos(
+        userDocId: userDocId,
+        correo: correo,
+        version: LegalDocuments.version,
+        canal: 'web',
+      );
+    } catch (_) {
+      // No bloquea el acceso si falla el registro de consentimiento.
+    }
   }
 
   void _mostrarError(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: Colors.red),
-    );
-  }
-
-  void _mostrarInfo(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
   }
 
   @override
@@ -626,9 +304,15 @@ class _LoginWebState extends State<LoginWeb> {
             bottom: 20,
             child: Row(
               children: [
-                _buildFooterLink('Privacidad'),
+                _buildFooterLink(
+                  'Privacidad',
+                  onTap: _mostrarTerminosYPrivacidad,
+                ),
                 const SizedBox(width: 18),
-                _buildFooterLink('Soporte'),
+                _buildFooterLink(
+                  'Soporte',
+                  onTap: _abrirRecuperacionContrasena,
+                ),
               ],
             ),
           ),
@@ -757,6 +441,17 @@ class _LoginWebState extends State<LoginWeb> {
                           ),
                         ),
                       ),
+                      const SizedBox(height: 16),
+                      LegalAcceptanceSection(
+                        branding: _branding,
+                        accepted: _aceptaTerminos,
+                        onChanged: (value) {
+                          setState(() {
+                            _aceptaTerminos = value ?? false;
+                          });
+                        },
+                        onViewDocuments: _mostrarTerminosYPrivacidad,
+                      ),
                       const SizedBox(height: 12),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -777,7 +472,7 @@ class _LoginWebState extends State<LoginWeb> {
                                 },
                               ),
                               const Text(
-                                'Recordar contrasena',
+                                'Recordar correo',
                                 style: TextStyle(fontSize: 12),
                               ),
                             ],
@@ -844,37 +539,34 @@ class _LoginWebState extends State<LoginWeb> {
       fillColor: _branding.surface.withOpacity(0.70),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(
-          color: _branding.primary.withOpacity(0.10),
-        ),
+        borderSide: BorderSide(color: _branding.primary.withOpacity(0.10)),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(
-          color: _branding.primary.withOpacity(0.10),
-        ),
+        borderSide: BorderSide(color: _branding.primary.withOpacity(0.10)),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(
-          color: _branding.primary,
-          width: 1.5,
-        ),
+        borderSide: BorderSide(color: _branding.primary, width: 1.5),
       ),
-      contentPadding: const EdgeInsets.symmetric(
-        horizontal: 16,
-        vertical: 15,
-      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
     );
   }
 
-  Widget _buildFooterLink(String label) {
-    return Text(
-      label,
-      style: TextStyle(
-        color: Colors.black.withOpacity(0.42),
-        fontSize: 11,
-        fontWeight: FontWeight.w500,
+  Widget _buildFooterLink(String label, {required VoidCallback onTap}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: Colors.black.withOpacity(0.42),
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
       ),
     );
   }

@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 
 import '../config/app_config.dart';
 import '../models/app_branding.dart';
-import '../services/firebase_service.dart';
 import 'dashboard_admin_web.dart';
 import 'dashboard_princesa_gales_norte_web.dart';
 import 'estadisticas_admin_web.dart';
@@ -33,8 +32,6 @@ class AdminLayout extends StatefulWidget {
 class _AdminLayoutState extends State<AdminLayout> {
   int _selectedIndex = 0;
   late Map<String, dynamic>? _userData;
-  final FirebaseService _service = FirebaseService();
-  bool _creandoDatosDemoSede = false;
   bool _sidebarCollapsed = false;
   String? _sedeVistaForzadaId;
   StreamSubscription<QuerySnapshot>? _solicitudesSubscription;
@@ -123,8 +120,6 @@ class _AdminLayoutState extends State<AdminLayout> {
                 branding: _brandingActiva,
                 nombreUsuario: _nombreUsuario,
                 showBrandLogo: true,
-                onCreateDemoData: _crearDatosDemoSedeActiva,
-                isCreatingDemoData: _creandoDatosDemoSede,
               )
             : const DashboardAdminWeb(),
         EstadisticasAdminWeb(sedeId: _sedeActivaId),
@@ -137,49 +132,6 @@ class _AdminLayoutState extends State<AdminLayout> {
         AlmuerzoHorariosAdminWeb(sedeId: _sedeActivaId),
         PersonalAdminWeb(sedeId: _sedeActivaId),
       ];
-
-  Future<void> _crearDatosDemoSedeActiva() async {
-    if (_creandoDatosDemoSede) return;
-
-    setState(() => _creandoDatosDemoSede = true);
-
-    try {
-      if (_sedeActivaId == SedeAccess.sedeNorteId) {
-        await _service.crearDatosDemoSedeNorte();
-        await _service.crearUsuariosDemoAppNorte();
-      } else if (_sedeActivaId == SedeAccess.sedeCentroId) {
-        await _service.crearDatosDemoSedeCentro();
-        await _service.crearUsuariosDemoAppCentro();
-      } else if (_sedeActivaId == SedeAccess.sedeCreSerId) {
-        await _service.crearDatosDemoSedeCreSer();
-        await _service.crearUsuariosDemoAppCreSer();
-      } else {
-        throw Exception('Selecciona una sede distinta a Matriz para crear demos.');
-      }
-
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Se crearon las credenciales demo de ${SedeAccess.displayNameForId(_sedeActivaId)}.',
-          ),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('No se pudieron crear los datos demo: $e'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _creandoDatosDemoSede = false);
-      }
-    }
-  }
 
   void _cambiarSedeVista(String sedeId) {
     if (!_sedesPermitidasUsuario.contains(sedeId)) {

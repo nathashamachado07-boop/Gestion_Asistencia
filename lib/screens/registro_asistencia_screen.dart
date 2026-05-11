@@ -72,6 +72,42 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
   Color get colorFondoVariacion => _branding.softAccent;
   bool get _isWebPortal => kIsWeb;
 
+  double _webSectionMaxWidth({
+    double compact = 760,
+    double regular = 860,
+    double wide = 960,
+  }) {
+    final width = MediaQuery.of(context).size.width;
+
+    if (width >= 1500) {
+      return wide;
+    }
+
+    if (width >= 1180) {
+      return regular;
+    }
+
+    return compact;
+  }
+
+  Widget _wrapWebSection(
+    Widget child, {
+    double? maxWidth,
+  }) {
+    if (!_isWebPortal) {
+      return child;
+    }
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: maxWidth ?? _webSectionMaxWidth(),
+        ),
+        child: child,
+      ),
+    );
+  }
+
   bool _esTiempoCompleto() {
     return widget.horariosDocente.any((horario) => horario.toString().startsWith("TC"));
   }
@@ -822,7 +858,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
             alignment: Alignment.topCenter,
             child: ConstrainedBox(
               constraints: BoxConstraints(
-                maxWidth: _isWebPortal ? 1080 : double.infinity,
+                maxWidth: _isWebPortal ? 980 : double.infinity,
               ),
               child: Column(
                 children: [
@@ -876,29 +912,39 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                   ),
                   SizedBox(height: _isWebPortal ? 26 : 20),
                   Padding(
-                    padding: EdgeInsets.symmetric(horizontal: _isWebPortal ? 0 : 25.0),
-                    child: Container(
-                      height: 55,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.8),
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(color: Colors.black12, blurRadius: 10, offset: const Offset(0, 4))
-                        ]
+                    padding: EdgeInsets.symmetric(
+                      horizontal: _isWebPortal ? 0 : 25.0,
+                    ),
+                    child: _wrapWebSection(
+                      Container(
+                        height: _isWebPortal ? 52 : 55,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.82),
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black12,
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          children: [
+                            _buildBotonSelector(0, "ASISTENCIA"),
+                            if (_esTiempoCompleto())
+                              _buildBotonSelector(1, "ALMUERZO"),
+                          ],
+                        ),
                       ),
-                      child: Row(
-                        children: [
-                          _buildBotonSelector(0, "ASISTENCIA"),
-                          if (_esTiempoCompleto()) _buildBotonSelector(1, "ALMUERZO"),
-                        ],
-                      ),
+                      maxWidth: _isWebPortal ? 560 : null,
                     ),
                   ),
                   const SizedBox(height: 10),
                   Expanded(
                     child: SingleChildScrollView(
                       physics: const BouncingScrollPhysics(),
-                      padding: EdgeInsets.all(_isWebPortal ? 32.0 : 25.0),
+                      padding: EdgeInsets.all(_isWebPortal ? 28.0 : 25.0),
                       child: (_pestanaInternaActiva == 0 || !_esTiempoCompleto())
                           ? _construirContenidoAsistencia()
                           : _construirContenidoAlmuerzoSolo(),
@@ -919,17 +965,28 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
         onTap: () => setState(() => _pestanaInternaActiva = index),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 300),
-          margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          margin: EdgeInsets.symmetric(
+            horizontal: _isWebPortal ? 5 : 6,
+            vertical: 6,
+          ),
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: estaActivo ? colorInstitucional : Colors.transparent, 
-            borderRadius: BorderRadius.circular(15),
-            boxShadow: estaActivo ? [BoxShadow(color: colorInstitucional.withOpacity(0.4), blurRadius: 4)] : null,
+            borderRadius: BorderRadius.circular(_isWebPortal ? 16 : 15),
+            boxShadow: estaActivo
+                ? [
+                    BoxShadow(
+                      color: colorInstitucional.withOpacity(0.28),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ]
+                : null,
           ),
           child: Text(
             texto, 
             style: TextStyle(
-              fontSize: 11, 
+              fontSize: _isWebPortal ? 12 : 11, 
               fontWeight: FontWeight.bold, 
               color: estaActivo ? Colors.white : colorInstitucional.withOpacity(0.6)
             ),
@@ -940,13 +997,19 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
   }
 
   Widget _buildMapaMini() {
-    return Container(
+    final mapCard = Container(
       height: _isWebPortal ? 230 : 180,
       margin: const EdgeInsets.symmetric(vertical: 15),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(25),
         border: Border.all(color: Colors.white, width: 5),
-        boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 12, offset: const Offset(0, 5))]
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black12,
+            blurRadius: 12,
+            offset: const Offset(0, 5),
+          ),
+        ],
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(20),
@@ -959,7 +1022,8 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
           ),
           children: [
             TileLayer(
-              urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+              urlTemplate:
+                  'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
               subdomains: const ['a', 'b', 'c', 'd'],
             ),
             MarkerLayer(
@@ -968,14 +1032,25 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                   point: _ubicacionInstituto,
                   width: 45,
                   height: 45,
-                  child: const Icon(Icons.location_on, color: Colors.red, size: 40),
+                  child: const Icon(
+                    Icons.location_on,
+                    color: Colors.red,
+                    size: 40,
+                  ),
                 ),
                 if (_posicionActual != null)
                   Marker(
-                    point: LatLng(_posicionActual!.latitude, _posicionActual!.longitude),
+                    point: LatLng(
+                      _posicionActual!.latitude,
+                      _posicionActual!.longitude,
+                    ),
                     width: 45,
                     height: 45,
-                    child: const Icon(Icons.person_pin_circle, color: Colors.blue, size: 40),
+                    child: const Icon(
+                      Icons.person_pin_circle,
+                      color: Colors.blue,
+                      size: 40,
+                    ),
                   ),
               ],
             ),
@@ -983,65 +1058,95 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
         ),
       ),
     );
+
+    return _wrapWebSection(
+      mapCard,
+      maxWidth: _webSectionMaxWidth(compact: 720, regular: 820, wide: 860),
+    );
   }
 
   Widget _construirContenidoAsistencia() {
     return Column(
       children: [
-        _buildRelojCard(),
+        _wrapWebSection(
+          _buildRelojCard(),
+          maxWidth: _webSectionMaxWidth(compact: 720, regular: 820, wide: 860),
+        ),
         const SizedBox(height: 15),
-        Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.85),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: colorInstitucional.withOpacity(0.1)),
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10)]
-          ),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: colorInstitucional.withOpacity(0.1), shape: BoxShape.circle),
-                child: Icon(Icons.wb_sunny_rounded, color: colorInstitucional, size: 22),
-              ),
-              const SizedBox(width: 15),
-              const Expanded(
-                child: Text(
-                  "Tu jornada estÃ¡ activa. Recuerda marcar a tiempo tus ingresos y salidas.",
-                  style: TextStyle(fontSize: 12, color: Colors.black87, height: 1.4),
+        _wrapWebSection(
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.85),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: colorInstitucional.withOpacity(0.1)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.02),
+                  blurRadius: 10,
                 ),
-              ),
-            ],
+              ],
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: colorInstitucional.withOpacity(0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.wb_sunny_rounded,
+                    color: colorInstitucional,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 15),
+                const Expanded(
+                  child: Text(
+                    "Tu jornada estÃ¡ activa. Recuerda marcar a tiempo tus ingresos y salidas.",
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.black87,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
+          maxWidth: _webSectionMaxWidth(compact: 720, regular: 820, wide: 860),
         ),
         if (!_esNocturno()) _buildMapaMini(),
         const SizedBox(height: 10),
         if (_isWebPortal)
-          Row(
-            children: [
-              Expanded(
-                child: _botonAsistencia(
-                  titulo: "MARCAR ENTRADA",
-                  subtitulo: "Iniciar registro de hoy",
-                  icon: Icons.login_rounded,
-                  color: colorInstitucional,
-                  procesando: _procesandoEntrada,
-                  onTap: () => _ejecutarRegistro(true),
+          _wrapWebSection(
+            Row(
+              children: [
+                Expanded(
+                  child: _botonAsistencia(
+                    titulo: "MARCAR ENTRADA",
+                    subtitulo: "Iniciar registro de hoy",
+                    icon: Icons.login_rounded,
+                    color: colorInstitucional,
+                    procesando: _procesandoEntrada,
+                    onTap: () => _ejecutarRegistro(true),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 18),
-              Expanded(
-                child: _botonAsistencia(
-                  titulo: "MARCAR SALIDA",
-                  subtitulo: "Finalizar labores",
-                  icon: Icons.logout_rounded,
-                  color: const Color(0xFF2C3E50),
-                  procesando: _procesandoSalida,
-                  onTap: () => _ejecutarRegistro(false),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: _botonAsistencia(
+                    titulo: "MARCAR SALIDA",
+                    subtitulo: "Finalizar labores",
+                    icon: Icons.logout_rounded,
+                    color: const Color(0xFF2C3E50),
+                    procesando: _procesandoSalida,
+                    onTap: () => _ejecutarRegistro(false),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
+            maxWidth: _webSectionMaxWidth(compact: 720, regular: 820, wide: 860),
           )
         else ...[
           _botonAsistencia(
@@ -1064,11 +1169,12 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
         ],
         const SizedBox(height: 25),
         if (_isWebPortal)
-          Center(
-            child: SizedBox(
-              width: 360,
+          _wrapWebSection(
+            SizedBox(
+              width: 320,
               child: _botonHistorial(false),
             ),
+            maxWidth: 320,
           )
         else
           _botonHistorial(false),
@@ -1081,25 +1187,27 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
 
     return Column(
       children: [
-        _buildRelojCard(),
+        _wrapWebSection(
+          _buildRelojCard(),
+          maxWidth: _webSectionMaxWidth(compact: 720, regular: 820, wide: 860),
+        ),
         if (!_esNocturno()) _buildMapaMini(),
         const SizedBox(height: 10),
         if (_isWebPortal)
-          Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 760),
-              child: almuerzoCard,
-            ),
+          _wrapWebSection(
+            almuerzoCard,
+            maxWidth: _webSectionMaxWidth(compact: 720, regular: 820, wide: 860),
           )
         else
           almuerzoCard,
         const SizedBox(height: 25),
         if (_isWebPortal)
-          Center(
-            child: SizedBox(
-              width: 360,
+          _wrapWebSection(
+            SizedBox(
+              width: 320,
               child: _botonHistorial(true),
             ),
+            maxWidth: 320,
           )
         else
           _botonHistorial(true),
@@ -1152,18 +1260,18 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
       body: Row(
         children: [
           Container(
-            width: 238,
+            width: 220,
             color: _branding.primaryDark,
             child: SafeArea(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
+                padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Container(
-                      width: 108,
-                      height: 108,
-                      padding: const EdgeInsets.all(14),
+                      width: 96,
+                      height: 96,
+                      padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.08),
                         borderRadius: BorderRadius.circular(18),
@@ -1184,7 +1292,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                       'INTESUD',
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: 18,
+                        fontSize: 16,
                         fontWeight: FontWeight.w800,
                         letterSpacing: 0.6,
                       ),
@@ -1200,7 +1308,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                     const SizedBox(height: 18),
                     Container(
                       width: double.infinity,
-                      padding: const EdgeInsets.all(14),
+                      padding: const EdgeInsets.all(13),
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.08),
                         borderRadius: BorderRadius.circular(18),
@@ -1224,7 +1332,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 16,
+                              fontSize: 15,
                               fontWeight: FontWeight.w800,
                             ),
                           ),
@@ -1295,8 +1403,8 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
             child: Column(
               children: [
                 Container(
-                  height: 72,
-                  padding: const EdgeInsets.symmetric(horizontal: 28),
+                  height: 74,
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
                   decoration: const BoxDecoration(
                     color: Colors.white,
                     boxShadow: [
@@ -1356,17 +1464,21 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                 ),
                 Expanded(
                   child: Padding(
-                    padding: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.fromLTRB(18, 18, 22, 22),
                     child: DecoratedBox(
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(30),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.08),
-                            blurRadius: 24,
-                            offset: const Offset(0, 12),
+                            color: Colors.black.withOpacity(0.06),
+                            blurRadius: 22,
+                            offset: const Offset(0, 10),
                           ),
                         ],
+                        border: Border.all(
+                          color: Colors.white.withOpacity(0.75),
+                          width: 1,
+                        ),
                       ),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(30),
@@ -1391,12 +1503,12 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
     final isActive = _indiceActual == index;
 
     return InkWell(
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(18),
       onTap: () => setState(() => _indiceActual = index),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 220),
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
           color: isActive ? Colors.white : Colors.white.withOpacity(0.08),
           borderRadius: BorderRadius.circular(18),
@@ -1405,8 +1517,8 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
         child: Row(
           children: [
             Container(
-              width: 40,
-              height: 40,
+              width: 38,
+              height: 38,
               decoration: BoxDecoration(
                 color: isActive
                     ? colorInstitucional.withOpacity(0.12)
@@ -1415,7 +1527,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
               ),
               child: Icon(
                 icon,
-                size: 22,
+                size: 20,
                 color: isActive ? colorInstitucional : Colors.white,
               ),
             ),
@@ -1426,7 +1538,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                 style: TextStyle(
                   color: isActive ? colorInstitucional : Colors.white,
                   fontWeight: isActive ? FontWeight.w800 : FontWeight.w600,
-                  fontSize: 14,
+                  fontSize: 13,
                 ),
               ),
             ),
@@ -1567,12 +1679,12 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
         opacity: procesando ? 0.88 : 1,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 220),
-          padding: const EdgeInsets.all(20),
+          padding: EdgeInsets.all(_isWebPortal ? 18 : 20),
           decoration: BoxDecoration(
             color: procesando
                 ? color.withOpacity(0.10)
                 : Colors.white.withOpacity(0.9),
-            borderRadius: BorderRadius.circular(25),
+            borderRadius: BorderRadius.circular(_isWebPortal ? 22 : 25),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withOpacity(0.05),
@@ -1591,7 +1703,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
             children: [
               AnimatedContainer(
                 duration: const Duration(milliseconds: 220),
-                padding: const EdgeInsets.all(12),
+                padding: EdgeInsets.all(_isWebPortal ? 11 : 12),
                 decoration: BoxDecoration(
                   color: color.withOpacity(procesando ? 0.18 : 0.1),
                   borderRadius: BorderRadius.circular(15),
@@ -1607,7 +1719,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                       )
                     : Icon(icon, color: color, size: 28),
               ),
-              const SizedBox(width: 20),
+              SizedBox(width: _isWebPortal ? 16 : 20),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1617,7 +1729,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         color: color,
-                        fontSize: 15,
+                        fontSize: _isWebPortal ? 14 : 15,
                       ),
                     ),
                     const SizedBox(height: 4),

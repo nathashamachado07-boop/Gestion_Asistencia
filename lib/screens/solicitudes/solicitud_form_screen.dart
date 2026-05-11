@@ -196,6 +196,10 @@ class _SolicitudFormScreenState extends State<SolicitudFormScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isWebLayout) {
+      return _buildWebLayout();
+    }
+
     return Scaffold(
       backgroundColor:
           _isWebLayout ? const Color(0xFFF4F7F8) : _branding.background,
@@ -305,6 +309,213 @@ class _SolicitudFormScreenState extends State<SolicitudFormScreen> {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildWebLayout() {
+    return Container(
+      color: const Color(0xFFF4F7F8),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(28),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1080),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 14,
+                  runSpacing: 14,
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 620),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Nueva solicitud',
+                            style: TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF243435),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Gestiona permisos y vacaciones desde una vista adaptada para navegador.',
+                            style: TextStyle(
+                              fontSize: 14,
+                              height: 1.45,
+                              color: Colors.black.withOpacity(0.58),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _openHistorialSolicitudes,
+                      icon: const Icon(Icons.history_rounded),
+                      label: const Text('Ver historial'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _branding.primary,
+                        backgroundColor: Colors.white,
+                        side: BorderSide(
+                          color: _branding.primary.withOpacity(0.20),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: 16,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 22),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(30),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.05),
+                        blurRadius: 18,
+                        offset: const Offset(0, 10),
+                      ),
+                    ],
+                  ),
+                  child: Form(
+                    key: _formKey,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Fecha de Solicitud:",
+                          style: TextStyle(
+                            color: _branding.primary,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        GestureDetector(
+                          onTap: () => _seleccionarFecha(context, 'solicitud'),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 15,
+                              vertical: 15,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(15),
+                              border: Border.all(
+                                color: const Color(0xFF4D7374),
+                                width: 1.4,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  DateFormat('dd/MM/yyyy')
+                                      .format(_fechaSolicitud),
+                                  style: const TextStyle(fontSize: 16),
+                                ),
+                                Icon(
+                                  Icons.calendar_today,
+                                  color: _branding.primary,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        _buildFieldTitle("Nombre del colaborador"),
+                        TextFormField(
+                          controller: _nombreController,
+                          decoration: _inputStyle(
+                            "Nombre del Colaborador",
+                            Icons.person,
+                          ),
+                        ),
+                        const SizedBox(height: 15),
+                        _buildFieldTitle("Tipo de tramite"),
+                        DropdownButtonFormField<String>(
+                          value: _tipoSeleccionado,
+                          decoration: _inputStyle(
+                            "Tipo de trÃ¡mite",
+                            Icons.list_alt,
+                          ),
+                          items: ['Permiso', 'Vacaciones']
+                              .map(
+                                (val) => DropdownMenuItem(
+                                  value: val,
+                                  child: Text(val),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (val) =>
+                              setState(() => _tipoSeleccionado = val!),
+                        ),
+                        const SizedBox(height: 20),
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 300),
+                          child: _tipoSeleccionado == 'Permiso'
+                              ? _buildFormPermiso()
+                              : _buildFormVacaciones(),
+                        ),
+                        const SizedBox(height: 30),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: SizedBox(
+                            width: 260,
+                            child: ElevatedButton(
+                              onPressed: _enviarFormulario,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _branding.primary,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              child: const Text(
+                                "ENVIAR SOLICITUD",
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _openHistorialSolicitudes() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => HistorialSolicitudesScreen(
+          nombreDocente: _nombreController.text,
+          sedeId: _branding.sedeId,
+        ),
       ),
     );
   }

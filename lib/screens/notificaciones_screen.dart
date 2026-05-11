@@ -95,10 +95,10 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
         .snapshots()
         .listen((snapshot) {
       final visibles = snapshot.docs.where((doc) {
-        final data = doc.data() as Map<String, dynamic>;
+        final data = doc.data();
         return _esAvisoVisible(data);
       }).map((doc) {
-        final data = doc.data() as Map<String, dynamic>;
+        final data = doc.data();
         return _AvisoViewData(
           id: doc.id,
           titulo: (data['titulo'] ?? 'Aviso').toString(),
@@ -153,6 +153,10 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isWebLayout) {
+      return _buildWebLayout();
+    }
+
     return Scaffold(
       backgroundColor:
           _isWebLayout ? const Color(0xFFF4F7F8) : _branding.background,
@@ -350,22 +354,197 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
     );
   }
 
+  Widget _buildWebLayout() {
+    return Container(
+      color: const Color(0xFFF4F7F8),
+      child: _cargando
+          ? Center(
+              child: CircularProgressIndicator(color: _branding.primary),
+            )
+          : RefreshIndicator(
+              onRefresh: _refrescarNotificaciones,
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(28),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 980),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(24),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(28),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.05),
+                                blurRadius: 18,
+                                offset: const Offset(0, 10),
+                              ),
+                            ],
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Container(
+                                width: 56,
+                                height: 56,
+                                decoration: BoxDecoration(
+                                  color: _branding.primary.withOpacity(0.10),
+                                  borderRadius: BorderRadius.circular(18),
+                                ),
+                                child: Icon(
+                                  Icons.notifications_active_outlined,
+                                  color: _branding.primary,
+                                  size: 28,
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'Comunicados recientes',
+                                      style: TextStyle(
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.w800,
+                                        color: Color(0xFF243435),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      _avisos.isEmpty
+                                          ? 'No tienes notificaciones nuevas en este momento.'
+                                          : 'Revisa tus avisos y notificaciones institucionales mas recientes.',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        height: 1.45,
+                                        color: Colors.black.withOpacity(0.58),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 10,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: _branding.primary.withOpacity(0.08),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Text(
+                                  '${_avisos.length} aviso${_avisos.length == 1 ? '' : 's'}',
+                                  style: TextStyle(
+                                    color: _branding.primary,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 22),
+                        if (_avisos.isEmpty)
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 28,
+                              vertical: 34,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(28),
+                              border: Border.all(
+                                color: _branding.primary.withOpacity(0.14),
+                              ),
+                            ),
+                            child: Column(
+                              children: [
+                                Container(
+                                  width: 68,
+                                  height: 68,
+                                  decoration: BoxDecoration(
+                                    color: _branding.primary.withOpacity(0.10),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(
+                                    Icons.mark_email_read_outlined,
+                                    color: _branding.primary,
+                                    size: 30,
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                const Text(
+                                  'Bandeja al dia',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w800,
+                                    color: Color(0xFF243435),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Todavia no tienes avisos o notificaciones nuevas.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    height: 1.5,
+                                    color: Colors.black.withOpacity(0.58),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        else
+                          ListView.separated(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: _avisos.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 16),
+                            itemBuilder: (context, index) {
+                              final aviso = _avisos[index];
+                              return _buildAvisoCard(
+                                aviso.titulo,
+                                aviso.mensaje,
+                                aviso.icono,
+                                aviso.fecha,
+                              );
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+    );
+  }
+
   Widget _buildAvisoCard(
     String titulo,
     String mensaje,
     IconData icono,
     String fechaAviso,
   ) {
+    final borderRadius = BorderRadius.circular(_isWebLayout ? 24 : 30);
+
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(_isWebLayout ? 20 : 16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(30),
+        borderRadius: borderRadius,
         boxShadow: [
           BoxShadow(
-            color: _branding.primary.withOpacity(0.1),
-            blurRadius: 15,
-            offset: const Offset(0, 8),
+            color: _branding.primary.withOpacity(_isWebLayout ? 0.06 : 0.1),
+            blurRadius: _isWebLayout ? 12 : 15,
+            offset: Offset(0, _isWebLayout ? 6 : 8),
           ),
         ],
         border: Border.all(
@@ -379,14 +558,14 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            padding: const EdgeInsets.all(10),
+            padding: EdgeInsets.all(_isWebLayout ? 12 : 10),
             decoration: BoxDecoration(
               color: _branding.primary.withOpacity(0.1),
-              shape: BoxShape.circle,
+              borderRadius: BorderRadius.circular(_isWebLayout ? 16 : 999),
             ),
             child: Icon(icono, color: _branding.primary, size: 24),
           ),
-          const SizedBox(width: 15),
+          SizedBox(width: _isWebLayout ? 18 : 15),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
