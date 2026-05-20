@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../config/app_config.dart';
 import '../models/app_branding.dart';
+import 'bootstrap_admin_ui.dart';
 
 class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
   const DashboardPrincesaGalesNorteWeb({
@@ -20,10 +21,10 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
   final bool showBrandLogo;
 
   Color get _primary => branding.primary;
-  Color get _secondary => branding.primary.withOpacity(0.82);
+  Color get _secondary => branding.primary.withValues(alpha: 0.82);
   Color get _accent => branding.softAccent;
   Color get _soft => branding.surface;
-  Color get _card => Colors.white.withOpacity(0.95);
+  Color get _card => Colors.white.withValues(alpha: 0.95);
   static const Color _ink = Color(0xFF3D1D2E);
   static const Color _muted = Color(0xFF8A6676);
   static const Color _success = Color(0xFF3FA36C);
@@ -39,120 +40,70 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(28),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [_primary, _secondary],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(28),
-              boxShadow: [
-                BoxShadow(
-                  color: _primary.withOpacity(0.18),
-                  blurRadius: 26,
-                  offset: const Offset(0, 14),
-                ),
-              ],
-            ),
-            child: Wrap(
-              alignment: WrapAlignment.start,
-              runSpacing: 18,
-              children: [
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 680),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: _accent.withOpacity(0.18),
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(color: Colors.white24),
-                        ),
-                        child: const Text(
-                          'Sede activa',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      Text(
-                        _sedeNombre,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 34,
-                          fontWeight: FontWeight.w800,
-                          height: 1.05,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        'Interfaz institucional personalizada para RRHH. '
-                        '$nombreUsuario esta gestionando esta sede desde el mismo acceso principal.',
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.9),
-                          fontSize: 14,
-                          height: 1.5,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+          BootstrapAdminHero(
+            branding: branding,
+            icon: Icons.apartment_rounded,
+            eyebrow: 'Sede activa',
+            title: _sedeNombre,
+            subtitle:
+                'Interfaz institucional para RRHH. $nombreUsuario esta gestionando esta sede desde un acceso principal mas claro y consistente.',
           ),
           const SizedBox(height: 24),
-          Wrap(
-            spacing: 18,
-            runSpacing: 18,
-            children: [
-              _buildStatCard(
-                title: 'Personal registrado',
-                icon: Icons.groups_2_outlined,
-                color: _primary,
-                stream: FirebaseFirestore.instance
-                    .collection('usuarios')
-                    .snapshots(),
-                shouldCount: (data) =>
-                    SedeAccess.matchesSede(data, sedeId) && _isTrackedStaff(data),
-              ),
-              _buildAttendanceCard(
-                title: 'Asistencias de hoy',
-                icon: Icons.how_to_reg_outlined,
-                color: _success,
-                countBuilder: (asistencias, nombresPermitidos) {
-                  final hoy = DateTime.now();
-                  return asistencias.where((doc) {
-                    final data = doc.data() as Map<String, dynamic>;
-                    return _belongsToTrackedUser(data, nombresPermitidos) &&
-                        _isSameDay(data['fecha'], hoy);
-                  }).length;
-                },
-              ),
-              _buildAttendanceCard(
-                title: 'Atrasos detectados',
-                icon: Icons.timer_off_outlined,
-                color: _danger,
-                countBuilder: (asistencias, nombresPermitidos) {
-                  return asistencias.where((doc) {
-                    final data = doc.data() as Map<String, dynamic>;
-                    return _belongsToTrackedUser(data, nombresPermitidos) &&
-                        _normalize(data['estado']) == 'atraso';
-                  }).length;
-                },
-              ),
-            ],
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final statCardWidth = constraints.maxWidth < 720
+                  ? constraints.maxWidth
+                  : 320.0;
+
+              return Wrap(
+                spacing: 18,
+                runSpacing: 18,
+                children: [
+                  _buildStatCard(
+                    width: statCardWidth,
+                    title: 'Personal registrado',
+                    icon: Icons.groups_2_outlined,
+                    color: _primary,
+                    stream: FirebaseFirestore.instance
+                        .collection('usuarios')
+                        .snapshots(),
+                    shouldCount: (data) =>
+                        SedeAccess.matchesSede(data, sedeId) &&
+                        _isTrackedStaff(data),
+                  ),
+                  _buildAttendanceCard(
+                    width: statCardWidth,
+                    title: 'Asistencias de hoy',
+                    icon: Icons.how_to_reg_outlined,
+                    color: _success,
+                    countBuilder: (asistencias, nombresPermitidos) {
+                      final hoy = DateTime.now();
+                      return _countUniqueTrackedPeople(
+                        asistencias,
+                        nombresPermitidos,
+                        predicate: (data) => _isSameDay(data['fecha'], hoy),
+                      );
+                    },
+                  ),
+                  _buildAttendanceCard(
+                    width: statCardWidth,
+                    title: 'Atrasos detectados',
+                    icon: Icons.timer_off_outlined,
+                    color: _danger,
+                    countBuilder: (asistencias, nombresPermitidos) {
+                      final hoy = DateTime.now();
+                      return _countUniqueTrackedPeople(
+                        asistencias,
+                        nombresPermitidos,
+                        predicate: (data) =>
+                            _isSameDay(data['fecha'], hoy) &&
+                            _normalize(data['estado']) == 'atraso',
+                      );
+                    },
+                  ),
+                ],
+              );
+            },
           ),
           const SizedBox(height: 24),
           LayoutBuilder(
@@ -172,13 +123,9 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
               return Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: _buildRoleBreakdownPanel(),
-                  ),
+                  Expanded(child: _buildRoleBreakdownPanel()),
                   const SizedBox(width: 18),
-                  Expanded(
-                    child: _buildRecentLatePanel(),
-                  ),
+                  Expanded(child: _buildRecentLatePanel()),
                 ],
               );
             },
@@ -188,11 +135,12 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
     );
   }
 
+  // ignore: unused_element
   Widget _buildBrandPanel() {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.12),
+        color: Colors.white.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: Colors.white24),
       ),
@@ -214,7 +162,9 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
                 ? ClipRRect(
                     borderRadius: BorderRadius.circular(24),
                     child: Padding(
-                      padding: EdgeInsets.all(_isCentro ? 2 : (_isCreSer ? 6 : 10)),
+                      padding: EdgeInsets.all(
+                        _isCentro ? 2 : (_isCreSer ? 6 : 10),
+                      ),
                       child: Image.asset(
                         branding.logoHeader,
                         fit: BoxFit.contain,
@@ -260,11 +210,7 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
           Positioned(
             top: 12,
             right: 18,
-            child: Icon(
-              Icons.auto_awesome,
-              size: 16,
-              color: Colors.white70,
-            ),
+            child: Icon(Icons.auto_awesome, size: 16, color: Colors.white70),
           ),
           Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -316,6 +262,7 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
   }
 
   Widget _buildStatCard({
+    required double width,
     required String title,
     required IconData icon,
     required Color color,
@@ -323,10 +270,12 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
     bool Function(Map<String, dynamic> data)? shouldCount,
   }) {
     return SizedBox(
-      width: 320,
+      width: width,
       child: StreamBuilder<QuerySnapshot>(
         stream: stream,
         builder: (context, snapshot) {
+          final isLoading =
+              snapshot.connectionState == ConnectionState.waiting;
           final docs = snapshot.data?.docs ?? const [];
           final count = shouldCount == null
               ? docs.length
@@ -335,17 +284,24 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
                   return shouldCount(data);
                 }).length;
 
-          return Container(
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
             padding: const EdgeInsets.all(22),
             decoration: BoxDecoration(
               color: _card,
               borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: color.withOpacity(0.12)),
+              border: Border.all(color: color.withValues(alpha: 0.14)),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.04),
-                  blurRadius: 16,
+                  color: color.withValues(alpha: 0.08),
+                  blurRadius: 20,
                   offset: const Offset(0, 8),
+                ),
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.03),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
                 ),
               ],
             ),
@@ -355,8 +311,9 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
                   width: 52,
                   height: 52,
                   decoration: BoxDecoration(
-                    color: color.withOpacity(0.12),
+                    color: color.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: color.withValues(alpha: 0.18)),
                   ),
                   child: Icon(icon, color: color),
                 ),
@@ -369,22 +326,41 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
                         title,
                         style: const TextStyle(
                           color: _muted,
-                          fontSize: 13,
+                          fontSize: 12,
                           fontWeight: FontWeight.w700,
+                          letterSpacing: 0.2,
                         ),
                       ),
                       const SizedBox(height: 6),
-                      Text(
-                        snapshot.connectionState == ConnectionState.waiting
-                            ? '...'
-                            : '$count',
-                        style: const TextStyle(
-                          color: _ink,
-                          fontSize: 28,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
+                      isLoading
+                          ? Container(
+                              width: 60,
+                              height: 28,
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            )
+                          : Text(
+                              '$count',
+                              style: const TextStyle(
+                                color: _ink,
+                                fontSize: 30,
+                                fontWeight: FontWeight.w800,
+                                height: 1.0,
+                              ),
+                            ),
                     ],
+                  ),
+                ),
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isLoading
+                        ? Colors.grey.shade300
+                        : color.withValues(alpha: 0.60),
                   ),
                 ),
               ],
@@ -396,21 +372,24 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
   }
 
   Widget _buildAttendanceCard({
+    required double width,
     required String title,
     required IconData icon,
     required Color color,
     required int Function(
       List<QueryDocumentSnapshot> asistencias,
       Set<String> nombresPermitidos,
-    ) countBuilder,
+    )
+    countBuilder,
   }) {
     return SizedBox(
-      width: 320,
+      width: width,
       child: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance.collection('usuarios').snapshots(),
         builder: (context, usuariosSnapshot) {
-          final nombresPermitidos =
-              _buildAllowedNames(usuariosSnapshot.data?.docs ?? const []);
+          final nombresPermitidos = _buildAllowedNames(
+            usuariosSnapshot.data?.docs ?? const [],
+          );
 
           return StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
@@ -419,21 +398,29 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
             builder: (context, asistenciasSnapshot) {
               final asistencias = asistenciasSnapshot.data?.docs ?? const [];
               final count = countBuilder(asistencias, nombresPermitidos);
-              final cargando = usuariosSnapshot.connectionState ==
-                      ConnectionState.waiting ||
-                  asistenciasSnapshot.connectionState == ConnectionState.waiting;
+              final cargando =
+                  usuariosSnapshot.connectionState == ConnectionState.waiting ||
+                  asistenciasSnapshot.connectionState ==
+                      ConnectionState.waiting;
 
-              return Container(
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOut,
                 padding: const EdgeInsets.all(22),
                 decoration: BoxDecoration(
                   color: _card,
                   borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: color.withOpacity(0.12)),
+                  border: Border.all(color: color.withValues(alpha: 0.14)),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.04),
-                      blurRadius: 16,
+                      color: color.withValues(alpha: 0.08),
+                      blurRadius: 20,
                       offset: const Offset(0, 8),
+                    ),
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.03),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
                     ),
                   ],
                 ),
@@ -443,8 +430,11 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
                       width: 52,
                       height: 52,
                       decoration: BoxDecoration(
-                        color: color.withOpacity(0.12),
+                        color: color.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: color.withValues(alpha: 0.18),
+                        ),
                       ),
                       child: Icon(icon, color: color),
                     ),
@@ -457,20 +447,41 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
                             title,
                             style: const TextStyle(
                               color: _muted,
-                              fontSize: 13,
+                              fontSize: 12,
                               fontWeight: FontWeight.w700,
+                              letterSpacing: 0.2,
                             ),
                           ),
                           const SizedBox(height: 6),
-                          Text(
-                            cargando ? '...' : '$count',
-                            style: const TextStyle(
-                              color: _ink,
-                              fontSize: 28,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
+                          cargando
+                              ? Container(
+                                  width: 60,
+                                  height: 28,
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey.shade100,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                )
+                              : Text(
+                                  '$count',
+                                  style: const TextStyle(
+                                    color: _ink,
+                                    fontSize: 30,
+                                    fontWeight: FontWeight.w800,
+                                    height: 1.0,
+                                  ),
+                                ),
                         ],
+                      ),
+                    ),
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: cargando
+                            ? Colors.grey.shade300
+                            : color.withValues(alpha: 0.60),
                       ),
                     ),
                   ],
@@ -565,8 +576,9 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance.collection('usuarios').snapshots(),
       builder: (context, usuariosSnapshot) {
-          final nombresPermitidos =
-            _buildAllowedNames(usuariosSnapshot.data?.docs ?? const []);
+        final nombresPermitidos = _buildAllowedNames(
+          usuariosSnapshot.data?.docs ?? const [],
+        );
 
         return StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance
@@ -574,22 +586,24 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
               .snapshots(),
           builder: (context, asistenciasSnapshot) {
             final docs = asistenciasSnapshot.data?.docs ?? const [];
-            final atrasos = docs.where((doc) {
-              final data = doc.data() as Map<String, dynamic>;
-              return _belongsToTrackedUser(data, nombresPermitidos) &&
-                  _normalize(data['estado']) == 'atraso';
-            }).toList()
-              ..sort((a, b) {
-                final fechaA = ((a.data() as Map<String, dynamic>)['fecha']
-                        as Timestamp?)
-                    ?.toDate();
-                final fechaB = ((b.data() as Map<String, dynamic>)['fecha']
-                        as Timestamp?)
-                    ?.toDate();
-                return (fechaB ?? DateTime(2000)).compareTo(
-                  fechaA ?? DateTime(2000),
-                );
-              });
+            final atrasos =
+                docs.where((doc) {
+                  final data = doc.data() as Map<String, dynamic>;
+                  return _belongsToTrackedUser(data, nombresPermitidos) &&
+                      _normalize(data['estado']) == 'atraso';
+                }).toList()..sort((a, b) {
+                  final fechaA =
+                      ((a.data() as Map<String, dynamic>)['fecha']
+                              as Timestamp?)
+                          ?.toDate();
+                  final fechaB =
+                      ((b.data() as Map<String, dynamic>)['fecha']
+                              as Timestamp?)
+                          ?.toDate();
+                  return (fechaB ?? DateTime(2000)).compareTo(
+                    fechaA ?? DateTime(2000),
+                  );
+                });
 
             final recientes = atrasos.take(5).toList();
 
@@ -599,7 +613,7 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: _accent.withOpacity(0.35)),
+                border: Border.all(color: _accent.withValues(alpha: 0.35)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -649,7 +663,9 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: _soft,
                           borderRadius: BorderRadius.circular(18),
-                          border: Border.all(color: _accent.withOpacity(0.22)),
+                          border: Border.all(
+                            color: _accent.withValues(alpha: 0.22),
+                          ),
                         ),
                         child: Row(
                           children: [
@@ -657,7 +673,7 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
                               width: 42,
                               height: 42,
                               decoration: BoxDecoration(
-                                color: _danger.withOpacity(0.12),
+                                color: _danger.withValues(alpha: 0.12),
                                 borderRadius: BorderRadius.circular(14),
                               ),
                               child: const Icon(
@@ -671,7 +687,8 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    (data['docente'] ?? 'Sin nombre').toString(),
+                                    (data['docente'] ?? 'Sin nombre')
+                                        .toString(),
                                     style: const TextStyle(
                                       color: _ink,
                                       fontWeight: FontWeight.w700,
@@ -721,32 +738,49 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
     Color color,
   ) {
     return Container(
-      width: 180,
-      padding: const EdgeInsets.all(16),
+      width: 190,
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: color.withOpacity(0.18)),
+        color: color.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.18)),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.06),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: color, size: 22),
-          const SizedBox(height: 12),
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: color, size: 20),
+          ),
+          const SizedBox(height: 14),
           Text(
             value,
             style: const TextStyle(
               color: _ink,
-              fontSize: 24,
+              fontSize: 26,
               fontWeight: FontWeight.w800,
+              height: 1.0,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 5),
           Text(
             label,
             style: const TextStyle(
               color: _muted,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w600,
+              fontSize: 12.5,
             ),
           ),
         ],
@@ -757,22 +791,66 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
   Set<String> _buildAllowedNames(List<QueryDocumentSnapshot> docs) {
     return docs
         .map((doc) => doc.data() as Map<String, dynamic>)
-        .where((data) => SedeAccess.matchesSede(data, sedeId) && _isTrackedStaff(data))
-        .map((data) => (data['nombre'] ?? '').toString().trim())
+        .where(
+          (data) =>
+              SedeAccess.matchesSede(data, sedeId) && _isTrackedStaff(data),
+        )
+        .map((data) => _normalizeAttendanceName(data['nombre']))
         .where((nombre) => nombre.isNotEmpty)
         .toSet();
+  }
+
+  int _countUniqueTrackedPeople(
+    List<QueryDocumentSnapshot> asistencias,
+    Set<String> nombresPermitidos, {
+    required bool Function(Map<String, dynamic> data) predicate,
+  }) {
+    final personas = <String>{};
+
+    for (final doc in asistencias) {
+      final data = doc.data() as Map<String, dynamic>;
+      if (!_belongsToTrackedUser(data, nombresPermitidos)) {
+        continue;
+      }
+      if (!predicate(data)) {
+        continue;
+      }
+
+      final nombre = _normalizeAttendanceName(data['docente']);
+      if (nombre.isEmpty) {
+        continue;
+      }
+      personas.add(nombre);
+    }
+
+    return personas.length;
   }
 
   bool _belongsToTrackedUser(
     Map<String, dynamic> data,
     Set<String> nombresPermitidos,
   ) {
-    final nombreMarcacion = (data['docente'] ?? '').toString().trim();
+    final nombreMarcacion = _normalizeAttendanceName(data['docente']);
+    if (nombreMarcacion.isEmpty) {
+      return false;
+    }
+
+    final sedeRegistro = SedeAccess.normalize(data['sedeId']);
+    if (sedeRegistro.isNotEmpty) {
+      return sedeRegistro == sedeId &&
+          nombresPermitidos.contains(nombreMarcacion);
+    }
+
     return nombresPermitidos.contains(nombreMarcacion);
   }
 
+  String _normalizeAttendanceName(dynamic value) {
+    return value?.toString().trim().toLowerCase() ?? '';
+  }
+
   bool _isTrackedStaff(Map<String, dynamic> data) {
-    return _matchesRole(data, 'Docente') || _matchesRole(data, 'Administrativo');
+    return _matchesRole(data, 'Docente') ||
+        _matchesRole(data, 'Administrativo');
   }
 
   bool _isSameDay(dynamic value, DateTime target) {
@@ -797,5 +875,4 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
     return (data['rol'] ?? '').toString().trim().toLowerCase() ==
         role.toLowerCase();
   }
-
 }

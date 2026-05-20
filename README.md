@@ -58,3 +58,25 @@ APK Sede Norte:
 ```bash
 flutter build apk --flavor norte -t lib/main_sede_norte.dart
 ```
+
+## Generar certificado .p12 de prueba
+
+Para probar el flujo de firma digital interna en Windows puedes generar un certificado PKCS#12 de prueba con:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\generar_certificado_prueba_p12.ps1
+```
+
+Eso crea estos archivos en `scripts\generated-certificates`:
+
+- `PruebaFirmaInterna.p12`
+- `PruebaFirmaInterna.pfx`
+- `PruebaFirmaInterna.cer`
+
+Si quieres definir otro nombre y otra clave:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\generar_certificado_prueba_p12.ps1 -CommonName "Juan Perez" -Password "MiClave123!" -Overwrite
+```
+
+Sube el archivo `.p12` o `.pfx` al perfil del usuario y usa la misma clave al firmar.

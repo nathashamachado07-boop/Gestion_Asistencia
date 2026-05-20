@@ -4,19 +4,15 @@ import 'package:intl/intl.dart';
 
 import '../config/app_config.dart';
 import '../models/app_branding.dart';
+import 'bootstrap_admin_ui.dart';
 
 class AlmuerzosAdminWeb extends StatelessWidget {
-  const AlmuerzosAdminWeb({
-    super.key,
-    this.isSedeNorte = false,
-    this.sedeId,
-  });
+  const AlmuerzosAdminWeb({super.key, this.isSedeNorte = false, this.sedeId});
 
   final bool isSedeNorte;
   final String? sedeId;
   String get _resolvedSedeId =>
-      sedeId ??
-      (isSedeNorte ? SedeAccess.sedeNorteId : SedeAccess.matrizId);
+      sedeId ?? (isSedeNorte ? SedeAccess.sedeNorteId : SedeAccess.matrizId);
 
   AppBranding get _branding => AppBranding.fromSedeId(_resolvedSedeId);
 
@@ -58,7 +54,9 @@ class AlmuerzosAdminWeb extends StatelessWidget {
   String _formatFecha(String fecha) {
     if (fecha.isEmpty) return '--';
     try {
-      return DateFormat('dd/MM/yyyy').format(DateFormat('yyyy-MM-dd').parse(fecha));
+      return DateFormat(
+        'dd/MM/yyyy',
+      ).format(DateFormat('yyyy-MM-dd').parse(fecha));
     } catch (_) {
       return fecha;
     }
@@ -117,17 +115,21 @@ class AlmuerzosAdminWeb extends StatelessWidget {
 
       registros.add(
         _AlmuerzoRegistroView(
-          colaborador: (data['nombre_usuario'] ?? usuario?['nombre'] ?? 'Sin nombre')
-              .toString(),
+          colaborador:
+              (data['nombre_usuario'] ?? usuario?['nombre'] ?? 'Sin nombre')
+                  .toString(),
           correo: correo,
           fecha: (data['fecha'] ?? '').toString(),
           horaSalida: (data['hora_salida'] ?? '--:--').toString(),
           horaRegreso: (data['hora_regreso'] ?? '--:--').toString(),
           estado: (data['estado'] ?? '').toString(),
-          tipoHorario: (data['tipo_horario'] ?? usuario?['tipo_horario'] ?? '--')
-              .toString(),
+          tipoHorario:
+              (data['tipo_horario'] ?? usuario?['tipo_horario'] ?? '--')
+                  .toString(),
           horarioAlmuerzo:
-              (data['almuerzo_horario'] ?? usuario?['almuerzo_horario_label'] ?? '--')
+              (data['almuerzo_horario'] ??
+                      usuario?['almuerzo_horario_label'] ??
+                      '--')
                   .toString(),
           momento: _parseMomento(data),
         ),
@@ -152,7 +154,7 @@ class AlmuerzosAdminWeb extends StatelessWidget {
                   colors: [
                     _surface,
                     Colors.white,
-                    _softAccent.withOpacity(0.42),
+                    _softAccent.withValues(alpha: 0.42),
                   ],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
@@ -179,29 +181,39 @@ class AlmuerzosAdminWeb extends StatelessWidget {
                 .collection('registros_almuerzo')
                 .snapshots(),
             builder: (context, almuerzosSnapshot) {
-              if (almuerzosSnapshot.connectionState == ConnectionState.waiting) {
+              if (almuerzosSnapshot.connectionState ==
+                  ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
               }
 
               return StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance.collection('usuarios').snapshots(),
+                stream: FirebaseFirestore.instance
+                    .collection('usuarios')
+                    .snapshots(),
                 builder: (context, usuariosSnapshot) {
-                  if (usuariosSnapshot.connectionState == ConnectionState.waiting) {
+                  if (usuariosSnapshot.connectionState ==
+                      ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
                   }
 
                   final registros = _buildRegistros(
                     almuerzosDocs:
-                        almuerzosSnapshot.data?.docs ?? <QueryDocumentSnapshot>[],
+                        almuerzosSnapshot.data?.docs ??
+                        <QueryDocumentSnapshot>[],
                     usuariosDocs:
-                        usuariosSnapshot.data?.docs ?? <QueryDocumentSnapshot>[],
+                        usuariosSnapshot.data?.docs ??
+                        <QueryDocumentSnapshot>[],
                   );
                   final total = registros.length;
                   final enAlmuerzo = registros
-                      .where((r) => r.estado.trim().toLowerCase() == 'en_almuerzo')
+                      .where(
+                        (r) => r.estado.trim().toLowerCase() == 'en_almuerzo',
+                      )
                       .length;
                   final finalizados = registros
-                      .where((r) => r.estado.trim().toLowerCase() == 'finalizado')
+                      .where(
+                        (r) => r.estado.trim().toLowerCase() == 'finalizado',
+                      )
                       .length;
                   final hoy = registros.where((r) => _isToday(r.fecha)).length;
 
@@ -256,14 +268,14 @@ class AlmuerzosAdminWeb extends StatelessWidget {
                               width: double.infinity,
                               padding: const EdgeInsets.all(20),
                               decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.94),
+                                color: Colors.white.withValues(alpha: 0.94),
                                 borderRadius: BorderRadius.circular(24),
                                 border: Border.all(
-                                  color: _primary.withOpacity(0.14),
+                                  color: _primary.withValues(alpha: 0.14),
                                 ),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: _primary.withOpacity(0.08),
+                                    color: _primary.withValues(alpha: 0.08),
                                     blurRadius: 20,
                                     offset: const Offset(0, 10),
                                   ),
@@ -277,8 +289,12 @@ class AlmuerzosAdminWeb extends StatelessWidget {
                                       Container(
                                         padding: const EdgeInsets.all(10),
                                         decoration: BoxDecoration(
-                                          color: _softAccent.withOpacity(0.72),
-                                          borderRadius: BorderRadius.circular(14),
+                                          color: _softAccent.withValues(
+                                            alpha: 0.72,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            14,
+                                          ),
                                         ),
                                         child: Icon(
                                           Icons.receipt_long_outlined,
@@ -288,7 +304,8 @@ class AlmuerzosAdminWeb extends StatelessWidget {
                                       const SizedBox(width: 14),
                                       Expanded(
                                         child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           children: [
                                             const Text(
                                               'Registros de almuerzo',
@@ -302,7 +319,9 @@ class AlmuerzosAdminWeb extends StatelessWidget {
                                             Text(
                                               'Visualizando solo almuerzos del personal de ${SedeAccess.displayNameForId(_resolvedSedeId)}.',
                                               style: TextStyle(
-                                                color: _primaryDark.withOpacity(0.74),
+                                                color: _primaryDark.withValues(
+                                                  alpha: 0.74,
+                                                ),
                                                 fontWeight: FontWeight.w500,
                                               ),
                                             ),
@@ -323,13 +342,17 @@ class AlmuerzosAdminWeb extends StatelessWidget {
                                         color: _surface,
                                         borderRadius: BorderRadius.circular(18),
                                         border: Border.all(
-                                          color: _primary.withOpacity(0.12),
+                                          color: _primary.withValues(
+                                            alpha: 0.12,
+                                          ),
                                         ),
                                       ),
                                       child: Text(
                                         'No hay registros de almuerzo para esta sede todavia.',
                                         style: TextStyle(
-                                          color: _primaryDark.withOpacity(0.76),
+                                          color: _primaryDark.withValues(
+                                            alpha: 0.76,
+                                          ),
                                           fontWeight: FontWeight.w600,
                                         ),
                                       ),
@@ -337,7 +360,10 @@ class AlmuerzosAdminWeb extends StatelessWidget {
                                   else if (compacto)
                                     Column(
                                       children: registros
-                                          .map((registro) => _buildRegistroCard(registro))
+                                          .map(
+                                            (registro) =>
+                                                _buildRegistroCard(registro),
+                                          )
                                           .toList(),
                                     )
                                   else
@@ -360,67 +386,13 @@ class AlmuerzosAdminWeb extends StatelessWidget {
   }
 
   Widget _buildHeroHeader() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(26),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [_primaryDark, _primary, _primary.withOpacity(0.86)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(28),
-        boxShadow: [
-          BoxShadow(
-            color: _primary.withOpacity(0.18),
-            blurRadius: 24,
-            offset: const Offset(0, 14),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 66,
-            height: 66,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white24),
-            ),
-            child: const Icon(
-              Icons.restaurant_rounded,
-              color: Colors.white,
-              size: 34,
-            ),
-          ),
-          const SizedBox(width: 18),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Control de almuerzos',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 28,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Consulta las salidas y regresos de almuerzo del personal de ${SedeAccess.displayNameForId(_resolvedSedeId)} sin mezclar informacion de otras sedes.',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.92),
-                    height: 1.45,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+    return BootstrapAdminHero(
+      branding: _branding,
+      icon: Icons.restaurant_rounded,
+      eyebrow: 'Seguimiento diario',
+      title: 'Control de almuerzos',
+      subtitle:
+          'Consulta las salidas y regresos de almuerzo del personal de ${SedeAccess.displayNameForId(_resolvedSedeId)} con una experiencia mas clara, ordenada y consistente.',
     );
   }
 
@@ -432,20 +404,33 @@ class AlmuerzosAdminWeb extends StatelessWidget {
   ) {
     return Container(
       width: 240,
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.94),
+        color: Colors.white.withValues(alpha: 0.96),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: color.withOpacity(0.14)),
+        border: Border.all(color: color.withValues(alpha: 0.18)),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.09),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
         children: [
           Container(
-            width: 48,
-            height: 48,
+            width: 50,
+            height: 50,
             decoration: BoxDecoration(
-              color: color.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(15),
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: color.withValues(alpha: 0.18)),
             ),
             child: Icon(icon, color: color),
           ),
@@ -459,15 +444,18 @@ class AlmuerzosAdminWeb extends StatelessWidget {
                   style: const TextStyle(
                     color: Color(0xFF6C7A89),
                     fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                    letterSpacing: 0.1,
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 5),
                 Text(
                   value,
                   style: const TextStyle(
                     color: Color(0xFF1E2937),
-                    fontSize: 28,
+                    fontSize: 30,
                     fontWeight: FontWeight.w800,
+                    height: 1.0,
                   ),
                 ),
               ],
@@ -482,7 +470,9 @@ class AlmuerzosAdminWeb extends StatelessWidget {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: DataTable(
-        headingRowColor: MaterialStatePropertyAll(_softAccent.withOpacity(0.82)),
+        headingRowColor: WidgetStatePropertyAll(
+          _softAccent.withValues(alpha: 0.82),
+        ),
         dataRowMinHeight: 68,
         dataRowMaxHeight: 78,
         columns: const [
@@ -506,13 +496,15 @@ class AlmuerzosAdminWeb extends StatelessWidget {
                   DataCell(_buildEstadoChip(registro.estado)),
                   DataCell(Text(registro.horarioAlmuerzo)),
                   DataCell(Text(registro.tipoHorario)),
-                  DataCell(SizedBox(
-                    width: 220,
-                    child: Text(
-                      registro.correo,
-                      overflow: TextOverflow.ellipsis,
+                  DataCell(
+                    SizedBox(
+                      width: 220,
+                      child: Text(
+                        registro.correo,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                  )),
+                  ),
                 ],
               ),
             )
@@ -527,9 +519,9 @@ class AlmuerzosAdminWeb extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: _surface.withOpacity(0.78),
+        color: _surface.withValues(alpha: 0.78),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _primary.withOpacity(0.12)),
+        border: Border.all(color: _primary.withValues(alpha: 0.12)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -554,10 +546,22 @@ class AlmuerzosAdminWeb extends StatelessWidget {
             spacing: 10,
             runSpacing: 10,
             children: [
-              _buildInfoPill(Icons.calendar_today_outlined, _formatFecha(registro.fecha)),
-              _buildInfoPill(Icons.logout_rounded, 'Salida: ${registro.horaSalida}'),
-              _buildInfoPill(Icons.login_rounded, 'Regreso: ${registro.horaRegreso}'),
-              _buildInfoPill(Icons.lunch_dining_outlined, registro.horarioAlmuerzo),
+              _buildInfoPill(
+                Icons.calendar_today_outlined,
+                _formatFecha(registro.fecha),
+              ),
+              _buildInfoPill(
+                Icons.logout_rounded,
+                'Salida: ${registro.horaSalida}',
+              ),
+              _buildInfoPill(
+                Icons.login_rounded,
+                'Regreso: ${registro.horaRegreso}',
+              ),
+              _buildInfoPill(
+                Icons.lunch_dining_outlined,
+                registro.horarioAlmuerzo,
+              ),
               _buildInfoPill(Icons.schedule_outlined, registro.tipoHorario),
             ],
           ),
@@ -565,7 +569,7 @@ class AlmuerzosAdminWeb extends StatelessWidget {
           Text(
             registro.correo,
             style: TextStyle(
-              color: _primaryDark.withOpacity(0.74),
+              color: _primaryDark.withValues(alpha: 0.74),
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -580,7 +584,7 @@ class AlmuerzosAdminWeb extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: _primary.withOpacity(0.12)),
+        border: Border.all(color: _primary.withValues(alpha: 0.12)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -601,19 +605,35 @@ class AlmuerzosAdminWeb extends StatelessWidget {
 
   Widget _buildEstadoChip(String estado) {
     final color = _estadoColor(estado);
+    final label = _resolveEstadoLabel(estado);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.11),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withOpacity(0.24)),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
       ),
-      child: Text(
-        _resolveEstadoLabel(estado),
-        style: TextStyle(
-          color: color,
-          fontWeight: FontWeight.w800,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: color,
+            ),
+          ),
+          const SizedBox(width: 7),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w800,
+              fontSize: 12.5,
+            ),
+          ),
+        ],
       ),
     );
   }

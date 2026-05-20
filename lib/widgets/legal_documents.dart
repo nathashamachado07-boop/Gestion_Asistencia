@@ -349,7 +349,7 @@ Future<PasswordRecoveryDialogResult?> showPasswordRecoveryDialog(
                       Text(
                         'La nueva contrasena debe tener minimo 8 caracteres, una mayuscula, una minuscula y un numero.',
                         style: TextStyle(
-                          color: Colors.black.withOpacity(0.58),
+                          color: Colors.black.withValues(alpha: 0.58),
                           fontSize: 12,
                           height: 1.4,
                         ),
@@ -359,7 +359,7 @@ Future<PasswordRecoveryDialogResult?> showPasswordRecoveryDialog(
                       Text(
                         'Si tu cuenta no tiene un dispositivo confiable activo, el restablecimiento debe gestionarse con RRHH o el administrador.',
                         style: TextStyle(
-                          color: Colors.black.withOpacity(0.60),
+                          color: Colors.black.withValues(alpha: 0.60),
                           fontSize: 12.5,
                           height: 1.45,
                         ),
@@ -583,7 +583,7 @@ Future<bool> showChangePasswordDialog(
                     Text(
                       'La nueva contrasena debe tener minimo 8 caracteres, una mayuscula, una minuscula y un numero.',
                       style: TextStyle(
-                        color: Colors.black.withOpacity(0.58),
+                        color: Colors.black.withValues(alpha: 0.58),
                         fontSize: 12,
                         height: 1.4,
                       ),
@@ -661,12 +661,12 @@ class LegalAcceptanceSection extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: branding.surface.withOpacity(0.94),
+        color: branding.surface.withValues(alpha: 0.94),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: accepted
-              ? branding.primary.withOpacity(0.28)
-              : Colors.black.withOpacity(0.08),
+              ? branding.primary.withValues(alpha: 0.28)
+              : Colors.black.withValues(alpha: 0.08),
         ),
       ),
       child: Column(
@@ -686,7 +686,7 @@ class LegalAcceptanceSection extends StatelessWidget {
                   child: Text(
                     'He leido y acepto los terminos, condiciones de uso y el aviso de proteccion de datos personales.',
                     style: TextStyle(
-                      color: Colors.black.withOpacity(0.72),
+                      color: Colors.black.withValues(alpha: 0.72),
                       fontSize: 12.5,
                       height: 1.45,
                       fontWeight: FontWeight.w600,
@@ -721,7 +721,7 @@ class LegalAcceptanceSection extends StatelessWidget {
                 Text(
                   'Referencia informativa: ${LegalDocuments.lawName}.',
                   style: TextStyle(
-                    color: Colors.black.withOpacity(0.46),
+                    color: Colors.black.withValues(alpha: 0.46),
                     fontSize: 11,
                   ),
                 ),
@@ -744,19 +744,21 @@ Widget _buildStatusCard({
     padding: const EdgeInsets.all(14),
     decoration: BoxDecoration(
       color: isError
-          ? Colors.redAccent.withOpacity(0.08)
-          : branding.surface.withOpacity(0.92),
+          ? Colors.redAccent.withValues(alpha: 0.08)
+          : branding.surface.withValues(alpha: 0.92),
       borderRadius: BorderRadius.circular(18),
       border: Border.all(
         color: isError
-            ? Colors.redAccent.withOpacity(0.20)
-            : branding.primary.withOpacity(0.14),
+            ? Colors.redAccent.withValues(alpha: 0.20)
+            : branding.primary.withValues(alpha: 0.14),
       ),
     ),
     child: Text(
       message,
       style: TextStyle(
-        color: isError ? Colors.redAccent : Colors.black.withOpacity(0.72),
+        color: isError
+            ? Colors.redAccent
+            : Colors.black.withValues(alpha: 0.72),
         height: 1.45,
         fontWeight: isError ? FontWeight.w600 : FontWeight.w500,
       ),

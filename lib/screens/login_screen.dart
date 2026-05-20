@@ -83,7 +83,7 @@ class _LoginScreenState extends State<LoginScreen>
     if (datosUsuario == null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Correo o contrasena incorrectos')),
+        const SnackBar(content: Text('Correo o contraseña incorrectos')),
       );
       return;
     }
@@ -102,6 +102,7 @@ class _LoginScreenState extends State<LoginScreen>
         sedeId: usuarioSedeId,
       );
     }
+    if (!mounted) return;
 
     if (UserRoleAccess.canUseAdminPanel(datosUsuario)) {
       if (kIsWeb) {
@@ -149,6 +150,7 @@ class _LoginScreenState extends State<LoginScreen>
           nombreDocente: nombre,
           horariosDocente: listaHorarios,
           correoUsuario: correo,
+          rolUsuario: rolDB,
           sedeId: usuarioSedeId,
         ),
       ),
@@ -236,7 +238,7 @@ class _LoginScreenState extends State<LoginScreen>
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.1),
+                              color: Colors.black.withValues(alpha: 0.1),
                               blurRadius: 20,
                             ),
                           ],
@@ -280,7 +282,7 @@ class _LoginScreenState extends State<LoginScreen>
                           borderRadius: BorderRadius.circular(30),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.08),
+                              color: Colors.black.withValues(alpha: 0.08),
                               blurRadius: 25,
                               offset: const Offset(0, 10),
                             ),
@@ -305,7 +307,7 @@ class _LoginScreenState extends State<LoginScreen>
                             const SizedBox(height: 18),
                             _buildTextField(
                               controller: _passController,
-                              hint: 'Contrasena',
+                              hint: 'Contraseña',
                               icon: Icons.lock_outline,
                               isPassword: true,
                             ),
@@ -326,7 +328,7 @@ class _LoginScreenState extends State<LoginScreen>
                               child: TextButton(
                                 onPressed: _abrirRecuperacionContrasena,
                                 child: Text(
-                                  'Olvidaste tu contrasena?',
+                                  'Olvidaste tu contraseña?',
                                   style: TextStyle(
                                     color: _branding.primary,
                                     fontSize: 12,
@@ -373,7 +375,7 @@ class _LoginScreenState extends State<LoginScreen>
                       ),
                       const SizedBox(height: 40),
                       Text(
-                        '${_branding.displayName} - Sistema de Gestion',
+                        '${_branding.displayName} - Sistema de Gestión',
                         style: TextStyle(
                           color: _branding.primary,
                           fontSize: 11,

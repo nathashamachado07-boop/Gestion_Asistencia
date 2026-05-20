@@ -4,10 +4,7 @@ import '../../config/app_config.dart';
 import '../../models/app_branding.dart';
 
 class RRHHSedeOption {
-  const RRHHSedeOption({
-    required this.sedeId,
-    required this.icon,
-  });
+  const RRHHSedeOption({required this.sedeId, required this.icon});
 
   final String sedeId;
   final IconData icon;
@@ -23,18 +20,12 @@ const List<RRHHSedeOption> rrhhSedeOptions = [
     sedeId: SedeAccess.matrizId,
     icon: Icons.account_balance_outlined,
   ),
-  RRHHSedeOption(
-    sedeId: SedeAccess.sedeNorteId,
-    icon: Icons.spa_outlined,
-  ),
+  RRHHSedeOption(sedeId: SedeAccess.sedeNorteId, icon: Icons.spa_outlined),
   RRHHSedeOption(
     sedeId: SedeAccess.sedeCentroId,
     icon: Icons.location_city_outlined,
   ),
-  RRHHSedeOption(
-    sedeId: SedeAccess.sedeCreSerId,
-    icon: Icons.school_outlined,
-  ),
+  RRHHSedeOption(sedeId: SedeAccess.sedeCreSerId, icon: Icons.school_outlined),
 ];
 
 class RRHHSedeSelectorPage extends StatelessWidget {
@@ -59,8 +50,8 @@ class RRHHSedeSelectorPage extends StatelessWidget {
     final opcionesVisibles = allowedSedeIds.isEmpty
         ? rrhhSedeOptions
         : rrhhSedeOptions
-            .where((option) => allowedSedeIds.contains(option.sedeId))
-            .toList();
+              .where((option) => allowedSedeIds.contains(option.sedeId))
+              .toList();
     return Scaffold(
       backgroundColor: branding.background,
       body: Stack(
@@ -72,7 +63,7 @@ class RRHHSedeSelectorPage extends StatelessWidget {
                   colors: [
                     branding.background,
                     branding.surface,
-                    branding.softAccent.withOpacity(0.7),
+                    branding.softAccent.withValues(alpha: 0.7),
                   ],
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
@@ -146,10 +137,10 @@ class RRHHSedeSelectorPage extends StatelessWidget {
                           width: 46,
                           height: 46,
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.18),
+                            color: Colors.white.withValues(alpha: 0.18),
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
-                              color: Colors.white.withOpacity(0.35),
+                              color: Colors.white.withValues(alpha: 0.35),
                             ),
                           ),
                           child: const Icon(
@@ -167,12 +158,14 @@ class RRHHSedeSelectorPage extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.72),
+                      color: Colors.white.withValues(alpha: 0.72),
                       borderRadius: BorderRadius.circular(28),
-                      border: Border.all(color: Colors.white.withOpacity(0.85)),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.85),
+                      ),
                       boxShadow: [
                         BoxShadow(
-                          color: branding.primary.withOpacity(0.08),
+                          color: branding.primary.withValues(alpha: 0.08),
                           blurRadius: 18,
                           offset: const Offset(0, 8),
                         ),
@@ -206,12 +199,13 @@ class RRHHSedeSelectorPage extends StatelessWidget {
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
                     itemCount: opcionesVisibles.length,
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      mainAxisSpacing: 14,
-                      crossAxisSpacing: 14,
-                      childAspectRatio: 0.72,
-                    ),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          mainAxisSpacing: 14,
+                          crossAxisSpacing: 14,
+                          childAspectRatio: 0.72,
+                        ),
                     itemBuilder: (context, index) {
                       final option = opcionesVisibles[index];
                       return _SedeCard(
@@ -242,7 +236,7 @@ class RRHHSedeSelectorPage extends StatelessWidget {
         borderRadius: BorderRadius.circular(26),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF426A6C).withOpacity(0.18),
+            color: const Color(0xFF426A6C).withValues(alpha: 0.18),
             blurRadius: 22,
             offset: const Offset(0, 12),
           ),
@@ -254,7 +248,7 @@ class RRHHSedeSelectorPage extends StatelessWidget {
             width: 58,
             height: 58,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.14),
+              color: Colors.white.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(18),
             ),
             child: Icon(icon, color: Colors.white, size: 30),
@@ -265,9 +259,12 @@ class RRHHSedeSelectorPage extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.14),
+                    color: Colors.white.withValues(alpha: 0.14),
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: const Text(
@@ -294,7 +291,7 @@ class RRHHSedeSelectorPage extends StatelessWidget {
                 Text(
                   subtitle,
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.92),
+                    color: Colors.white.withValues(alpha: 0.92),
                     height: 1.42,
                     fontWeight: FontWeight.w500,
                   ),
@@ -309,10 +306,7 @@ class RRHHSedeSelectorPage extends StatelessWidget {
 }
 
 class _SedeCard extends StatelessWidget {
-  const _SedeCard({
-    required this.option,
-    required this.onTap,
-  });
+  const _SedeCard({required this.option, required this.onTap});
 
   final RRHHSedeOption option;
   final VoidCallback onTap;
@@ -332,7 +326,7 @@ class _SedeCard extends StatelessWidget {
               colors: [
                 branding.primaryDark,
                 branding.primary,
-                branding.primary.withOpacity(0.9),
+                branding.primary.withValues(alpha: 0.9),
               ],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
@@ -340,13 +334,13 @@ class _SedeCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(26),
             boxShadow: [
               BoxShadow(
-                color: branding.primary.withOpacity(0.18),
+                color: branding.primary.withValues(alpha: 0.18),
                 blurRadius: 18,
                 offset: const Offset(0, 12),
               ),
             ],
           ),
-            child: Padding(
+          child: Padding(
             padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -357,13 +351,10 @@ class _SedeCard extends StatelessWidget {
                       width: 46,
                       height: 46,
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.14),
+                        color: Colors.white.withValues(alpha: 0.14),
                         borderRadius: BorderRadius.circular(16),
                       ),
-                      child: Icon(
-                        option.icon,
-                        color: Colors.white,
-                      ),
+                      child: Icon(option.icon, color: Colors.white),
                     ),
                     const Spacer(),
                     const Icon(
@@ -383,7 +374,7 @@ class _SedeCard extends StatelessWidget {
                           width: 92,
                           height: 92,
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.08),
+                            color: Colors.white.withValues(alpha: 0.08),
                             borderRadius: BorderRadius.circular(28),
                           ),
                         ),
@@ -403,7 +394,7 @@ class _SedeCard extends StatelessWidget {
                           height: 72,
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.12),
+                            color: Colors.white.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(22),
                           ),
                           child: Image.asset(
@@ -425,9 +416,11 @@ class _SedeCard extends StatelessWidget {
                   width: double.infinity,
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.12),
+                    color: Colors.black.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: Colors.white.withOpacity(0.08)),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.08),
+                    ),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -449,7 +442,7 @@ class _SedeCard extends StatelessWidget {
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          color: Colors.white.withOpacity(0.82),
+                          color: Colors.white.withValues(alpha: 0.82),
                           fontSize: 12,
                           height: 1.3,
                           fontWeight: FontWeight.w500,

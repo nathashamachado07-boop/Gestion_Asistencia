@@ -32,9 +32,7 @@ class ReportesRRHHScreen extends StatelessWidget {
 }
 
 class _ReportesSedeDetalle extends StatefulWidget {
-  const _ReportesSedeDetalle({
-    required this.option,
-  });
+  const _ReportesSedeDetalle({required this.option});
 
   final RRHHSedeOption option;
 
@@ -165,16 +163,17 @@ class _ReportesSedeDetalleState extends State<_ReportesSedeDetalle> {
       }
 
       return true;
-    }).toList()
-      ..sort((a, b) {
-        final dataA = a.data() as Map<String, dynamic>;
-        final dataB = b.data() as Map<String, dynamic>;
-        final fechaA =
-            _extractFecha(dataA['fecha']) ?? DateTime.fromMillisecondsSinceEpoch(0);
-        final fechaB =
-            _extractFecha(dataB['fecha']) ?? DateTime.fromMillisecondsSinceEpoch(0);
-        return fechaB.compareTo(fechaA);
-      });
+    }).toList()..sort((a, b) {
+      final dataA = a.data() as Map<String, dynamic>;
+      final dataB = b.data() as Map<String, dynamic>;
+      final fechaA =
+          _extractFecha(dataA['fecha']) ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      final fechaB =
+          _extractFecha(dataB['fecha']) ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      return fechaB.compareTo(fechaA);
+    });
   }
 
   @override
@@ -196,7 +195,9 @@ class _ReportesSedeDetalleState extends State<_ReportesSedeDetalle> {
         children: [
           _buildBackground(),
           StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance.collection('usuarios').snapshots(),
+            stream: FirebaseFirestore.instance
+                .collection('usuarios')
+                .snapshots(),
             builder: (context, usuariosSnapshot) {
               if (usuariosSnapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
@@ -206,9 +207,11 @@ class _ReportesSedeDetalleState extends State<_ReportesSedeDetalle> {
                   usuariosSnapshot.data?.docs ?? <QueryDocumentSnapshot>[];
               final allowedNames = usuariosDocs
                   .map((doc) => doc.data() as Map<String, dynamic>)
-                  .where((data) =>
-                      _isTrackedUser(data) &&
-                      SedeAccess.matchesSede(data, widget.option.sedeId))
+                  .where(
+                    (data) =>
+                        _isTrackedUser(data) &&
+                        SedeAccess.matchesSede(data, widget.option.sedeId),
+                  )
                   .map((data) => (data['nombre'] ?? '').toString().trim())
                   .where((name) => name.isNotEmpty)
                   .toSet();
@@ -219,43 +222,55 @@ class _ReportesSedeDetalleState extends State<_ReportesSedeDetalle> {
                     .orderBy('fecha', descending: true)
                     .snapshots(),
                 builder: (context, asistenciasSnapshot) {
-                  if (asistenciasSnapshot.connectionState == ConnectionState.waiting) {
+                  if (asistenciasSnapshot.connectionState ==
+                      ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
                   }
 
                   if (asistenciasSnapshot.hasError) {
-                    return const Center(child: Text('Error al cargar reportes.'));
+                    return const Center(
+                      child: Text('Error al cargar reportes.'),
+                    );
                   }
 
                   final asistencias =
-                      asistenciasSnapshot.data?.docs ?? <QueryDocumentSnapshot>[];
+                      asistenciasSnapshot.data?.docs ??
+                      <QueryDocumentSnapshot>[];
                   final estados = <String>{
                     'Todos',
                     ...asistencias
-                        .map((doc) => (doc.data() as Map<String, dynamic>)['estado'])
+                        .map(
+                          (doc) =>
+                              (doc.data() as Map<String, dynamic>)['estado'],
+                        )
                         .whereType<String>()
                         .where((value) => value.trim().isNotEmpty),
                   }.toList();
                   final tipos = <String>{
                     'Todos',
                     ...asistencias
-                        .map((doc) => (doc.data() as Map<String, dynamic>)['tipo'])
+                        .map(
+                          (doc) => (doc.data() as Map<String, dynamic>)['tipo'],
+                        )
                         .whereType<String>()
                         .where((value) => value.trim().isNotEmpty),
                   }.toList();
-                  final anios = <String>{
-                    'Todos',
-                    ...asistencias
-                        .map((doc) => _extractFecha(
-                            (doc.data() as Map<String, dynamic>)['fecha']))
-                        .whereType<DateTime>()
-                        .map((fecha) => fecha.year.toString()),
-                  }.toList()
-                    ..sort((a, b) {
-                      if (a == 'Todos') return -1;
-                      if (b == 'Todos') return 1;
-                      return b.compareTo(a);
-                    });
+                  final anios =
+                      <String>{
+                        'Todos',
+                        ...asistencias
+                            .map(
+                              (doc) => _extractFecha(
+                                (doc.data() as Map<String, dynamic>)['fecha'],
+                              ),
+                            )
+                            .whereType<DateTime>()
+                            .map((fecha) => fecha.year.toString()),
+                      }.toList()..sort((a, b) {
+                        if (a == 'Todos') return -1;
+                        if (b == 'Todos') return 1;
+                        return b.compareTo(a);
+                      });
 
                   final registros = _filterAsistencias(
                     asistencias: asistencias,
@@ -276,7 +291,8 @@ class _ReportesSedeDetalleState extends State<_ReportesSedeDetalle> {
                                 _buildEmptyState()
                               else
                                 ...registros.map((doc) {
-                                  final data = doc.data() as Map<String, dynamic>;
+                                  final data =
+                                      doc.data() as Map<String, dynamic>;
                                   return _buildReportCard(data);
                                 }),
                             ],
@@ -304,7 +320,7 @@ class _ReportesSedeDetalleState extends State<_ReportesSedeDetalle> {
                 colors: [
                   _branding.background,
                   _branding.surface,
-                  _branding.softAccent.withOpacity(0.78),
+                  _branding.softAccent.withValues(alpha: 0.78),
                 ],
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
@@ -384,7 +400,7 @@ class _ReportesSedeDetalleState extends State<_ReportesSedeDetalle> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.14),
+              color: Colors.white.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(999),
             ),
             child: const Text(
@@ -411,7 +427,7 @@ class _ReportesSedeDetalleState extends State<_ReportesSedeDetalle> {
           Text(
             'Registros encontrados: $total',
             style: TextStyle(
-              color: Colors.white.withOpacity(0.9),
+              color: Colors.white.withValues(alpha: 0.9),
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -424,10 +440,7 @@ class _ReportesSedeDetalleState extends State<_ReportesSedeDetalle> {
                 Icons.calendar_today_outlined,
                 DateFormat('dd MMM, yyyy').format(DateTime.now()),
               ),
-              _buildHeaderPill(
-                Icons.location_on_outlined,
-                widget.option.title,
-              ),
+              _buildHeaderPill(Icons.location_on_outlined, widget.option.title),
             ],
           ),
         ],
@@ -439,7 +452,7 @@ class _ReportesSedeDetalleState extends State<_ReportesSedeDetalle> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.14),
+        color: Colors.white.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Row(
@@ -466,7 +479,9 @@ class _ReportesSedeDetalleState extends State<_ReportesSedeDetalle> {
     List<String> tipos,
     List<String> anios,
   ) {
-    final estadoValue = estados.contains(_estadoFiltro) ? _estadoFiltro : 'Todos';
+    final estadoValue = estados.contains(_estadoFiltro)
+        ? _estadoFiltro
+        : 'Todos';
     final tipoValue = tipos.contains(_tipoFiltro) ? _tipoFiltro : 'Todos';
     final anioValue = anios.contains(_anioFiltro) ? _anioFiltro : 'Todos';
     final mesValue = _meses.contains(_mesFiltro) ? _mesFiltro : 'Todos';
@@ -474,12 +489,12 @@ class _ReportesSedeDetalleState extends State<_ReportesSedeDetalle> {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.84),
+        color: Colors.white.withValues(alpha: 0.84),
         borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: Colors.white.withOpacity(0.9)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.9)),
         boxShadow: [
           BoxShadow(
-            color: _branding.primary.withOpacity(0.08),
+            color: _branding.primary.withValues(alpha: 0.08),
             blurRadius: 16,
             offset: const Offset(0, 8),
           ),
@@ -500,7 +515,7 @@ class _ReportesSedeDetalleState extends State<_ReportesSedeDetalle> {
           Text(
             'Ordena el reporte por estado, tipo y periodo con un bloque visual mas limpio.',
             style: TextStyle(
-              color: _branding.primaryDark.withOpacity(0.72),
+              color: _branding.primaryDark.withValues(alpha: 0.72),
               height: 1.4,
               fontWeight: FontWeight.w500,
             ),
@@ -513,13 +528,15 @@ class _ReportesSedeDetalleState extends State<_ReportesSedeDetalle> {
               hintText: 'Buscar colaborador',
               prefixIcon: Icon(Icons.search, color: _branding.primary),
               filled: true,
-              fillColor: Colors.white.withOpacity(0.94),
+              fillColor: Colors.white.withValues(alpha: 0.94),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(20),
                 borderSide: BorderSide.none,
               ),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 18,
+              ),
             ),
           ),
           const SizedBox(height: 14),
@@ -535,7 +552,8 @@ class _ReportesSedeDetalleState extends State<_ReportesSedeDetalle> {
                     label: 'Estado',
                     value: estadoValue,
                     items: estados,
-                    onChanged: (value) => setState(() => _estadoFiltro = value!),
+                    onChanged: (value) =>
+                        setState(() => _estadoFiltro = value!),
                   ),
                   _buildDropdown(
                     width: width,
@@ -577,26 +595,25 @@ class _ReportesSedeDetalleState extends State<_ReportesSedeDetalle> {
     return SizedBox(
       width: width,
       child: DropdownButtonFormField<String>(
-        value: value,
+        initialValue: value,
         decoration: InputDecoration(
           labelText: label,
           filled: true,
-          fillColor: Colors.white.withOpacity(0.94),
+          fillColor: Colors.white.withValues(alpha: 0.94),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(20),
             borderSide: BorderSide.none,
           ),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 16,
+          ),
         ),
         items: items
             .map(
               (item) => DropdownMenuItem<String>(
                 value: item,
-                child: Text(
-                  item,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                child: Text(item, overflow: TextOverflow.ellipsis),
               ),
             )
             .toList(),
@@ -617,6 +634,8 @@ class _ReportesSedeDetalleState extends State<_ReportesSedeDetalle> {
       colorEstado = Colors.redAccent;
     } else if (estado == 'Salida Anticipada') {
       colorEstado = Colors.orange;
+    } else if (estado == 'Salida anticipada autorizada') {
+      colorEstado = const Color(0xFF5E35B1);
     } else if (estado == 'Completada') {
       colorEstado = Colors.green;
     }
@@ -625,12 +644,12 @@ class _ReportesSedeDetalleState extends State<_ReportesSedeDetalle> {
       margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.88),
+        color: Colors.white.withValues(alpha: 0.88),
         borderRadius: BorderRadius.circular(26),
-        border: Border.all(color: Colors.white.withOpacity(0.92)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.92)),
         boxShadow: [
           BoxShadow(
-            color: _branding.primary.withOpacity(0.06),
+            color: _branding.primary.withValues(alpha: 0.06),
             blurRadius: 12,
             offset: const Offset(0, 7),
           ),
@@ -643,7 +662,7 @@ class _ReportesSedeDetalleState extends State<_ReportesSedeDetalle> {
             children: [
               CircleAvatar(
                 radius: 24,
-                backgroundColor: _branding.primary.withOpacity(0.12),
+                backgroundColor: _branding.primary.withValues(alpha: 0.12),
                 child: Icon(
                   esEntrada ? Icons.login_rounded : Icons.logout_rounded,
                   color: _branding.primary,
@@ -674,9 +693,12 @@ class _ReportesSedeDetalleState extends State<_ReportesSedeDetalle> {
               ),
               const SizedBox(width: 8),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
-                  color: colorEstado.withOpacity(0.12),
+                  color: colorEstado.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
@@ -728,7 +750,7 @@ class _ReportesSedeDetalleState extends State<_ReportesSedeDetalle> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: _branding.surface.withOpacity(0.95),
+        color: _branding.surface.withValues(alpha: 0.95),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Row(
@@ -757,7 +779,7 @@ class _ReportesSedeDetalleState extends State<_ReportesSedeDetalle> {
           Icon(
             Icons.history_toggle_off_rounded,
             size: 78,
-            color: _branding.primary.withOpacity(0.42),
+            color: _branding.primary.withValues(alpha: 0.42),
           ),
           const SizedBox(height: 12),
           const Text(

@@ -1,6 +1,3 @@
-import 'dart:html' as html;
-import 'dart:typed_data';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:excel/excel.dart' as xls;
 import 'package:flutter/material.dart';
@@ -12,13 +9,12 @@ import 'package:printing/printing.dart';
 
 import '../config/app_config.dart';
 import '../models/app_branding.dart';
+import 'bootstrap_admin_ui.dart';
+import 'reportes_excel_download_stub.dart'
+    if (dart.library.html) 'reportes_excel_download_web.dart';
 
 class ReportesAdminWeb extends StatefulWidget {
-  const ReportesAdminWeb({
-    super.key,
-    this.isSedeNorte = false,
-    this.sedeId,
-  });
+  const ReportesAdminWeb({super.key, this.isSedeNorte = false, this.sedeId});
 
   final bool isSedeNorte;
   final String? sedeId;
@@ -31,6 +27,9 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
   String mesSeleccionado = 'Abril';
   int anioSeleccionado = 2026;
   String estadoSeleccionado = 'Todos';
+  late Stream<QuerySnapshot> _asistenciasStream;
+  late Stream<QuerySnapshot> _usuariosStream;
+  late Stream<QuerySnapshot> _solicitudesStream;
 
   final List<String> meses = const [
     'Enero',
@@ -69,8 +68,22 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
     'Con permiso',
     'Retraso con permiso',
     'Salida Anticipada',
+    'Salida con retraso',
+    'Salida anticipada autorizada',
     'Completada',
   ];
+
+  static const Map<String, String> _estadoFiltroLabels = {
+    'Todos': 'Todos',
+    'A tiempo': 'Entrada a tiempo',
+    'Atraso': 'Atraso',
+    'Con permiso': 'Con permiso',
+    'Retraso con permiso': 'Retraso con permiso',
+    'Salida Anticipada': 'Salida anticipada',
+    'Salida con retraso': 'Salida con retraso',
+    'Salida anticipada autorizada': 'Salida anticipada autorizada',
+    'Completada': 'Salida a tiempo',
+  };
 
   String get _resolvedSedeId =>
       widget.sedeId ??
@@ -85,6 +98,59 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
   Color get _secondaryColor => _branding.primaryDark;
   Color get _excelHeaderColor => _branding.primary;
   Color get _excelSoftColor => _branding.surface;
+
+  String _estadoFiltroLabel(String value) =>
+      _estadoFiltroLabels[value] ?? value;
+
+  String _excelHex(Color color) =>
+      '#${color.toARGB32().toRadixString(16).substring(2).toUpperCase()}';
+
+  // --- Ciclo de vida y datos en vivo --------------------------------------
+
+  @override
+  void initState() {
+    super.initState();
+    _rebuildStreams();
+  }
+
+  @override
+  void didUpdateWidget(covariant ReportesAdminWeb oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.sedeId != widget.sedeId ||
+        oldWidget.isSedeNorte != widget.isSedeNorte) {
+      _rebuildStreams();
+    }
+  }
+
+  Stream<QuerySnapshot> _buildAsistenciasStream() {
+    final asistenciasQuery = FirebaseFirestore.instance.collection(
+      'asistencias_realizadas',
+    );
+    return _resolvedSedeId == SedeAccess.matrizId
+        ? asistenciasQuery.snapshots()
+        : asistenciasQuery
+              .where('sedeId', isEqualTo: _resolvedSedeId)
+              .snapshots();
+  }
+
+  Stream<QuerySnapshot> _buildUsuariosStream() {
+    return FirebaseFirestore.instance.collection('usuarios').snapshots();
+  }
+
+  Stream<QuerySnapshot> _buildSolicitudesStream() {
+    final solicitudesQuery = FirebaseFirestore.instance.collection('solicitudes');
+    return _resolvedSedeId == SedeAccess.matrizId
+        ? solicitudesQuery.snapshots()
+        : solicitudesQuery
+              .where('sedeId', isEqualTo: _resolvedSedeId)
+              .snapshots();
+  }
+
+  void _rebuildStreams() {
+    _asistenciasStream = _buildAsistenciasStream();
+    _usuariosStream = _buildUsuariosStream();
+    _solicitudesStream = _buildSolicitudesStream();
+  }
 
   String _normalizarTexto(dynamic value) {
     return value?.toString().trim().toLowerCase() ?? '';
@@ -104,6 +170,8 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
     return SedeAccess.matchesSede(data, _resolvedSedeId);
   }
 
+  // --- Reglas de visibilidad para reportes --------------------------------
+
   Set<String> _obtenerUsuariosPermitidosPorSede(
     List<QueryDocumentSnapshot> docs,
   ) {
@@ -112,7 +180,8 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
         .where((data) {
           final esDeSede = _matchesCurrentSede(data);
           final esRolValido =
-              _matchesRole(data, 'Docente') || _matchesRole(data, 'Administrativo');
+              _matchesRole(data, 'Docente') ||
+              _matchesRole(data, 'Administrativo');
           return esDeSede && esRolValido;
         })
         .map((data) => (data['nombre'] ?? '').toString().trim())
@@ -124,7 +193,8 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
     Map<String, dynamic> data, {
     Set<String>? nombresPermitidos,
   }) {
-    final tieneSedeExplicita = _normalizarTexto(data['sedeId']).isNotEmpty ||
+    final tieneSedeExplicita =
+        _normalizarTexto(data['sedeId']).isNotEmpty ||
         _normalizarTexto(data['sede']).isNotEmpty;
 
     if (tieneSedeExplicita) {
@@ -137,6 +207,19 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
     }
 
     return false;
+  }
+
+  List<Map<String, dynamic>> _extraerPermisosAprobadosFiltrados(
+    List<QueryDocumentSnapshot> docs,
+  ) {
+    return docs
+        .map((doc) => doc.data() as Map<String, dynamic>)
+        .where((data) {
+          return _normalizarTexto(data['estado']) == 'aprobado' &&
+              _matchesCurrentSede(data) &&
+              _normalizarTexto(data['tipo']) == 'permiso';
+        })
+        .toList();
   }
 
   Duration? _parseHora(String? value) {
@@ -206,7 +289,9 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
     final fechaRegistro = fechaRegistroRaw.toDate();
 
     final fechaPermiso =
-        permiso['fechaPermiso'] ?? permiso['fechaInicio'] ?? permiso['fechaSolicitud'];
+        permiso['fechaPermiso'] ??
+        permiso['fechaInicio'] ??
+        permiso['fechaSolicitud'];
     if (!_mismaFecha(fechaPermiso, fechaRegistro)) {
       return false;
     }
@@ -244,7 +329,9 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
     final fechaRegistro = fechaRegistroRaw.toDate();
 
     final fechaPermiso =
-        permiso['fechaPermiso'] ?? permiso['fechaInicio'] ?? permiso['fechaSolicitud'];
+        permiso['fechaPermiso'] ??
+        permiso['fechaInicio'] ??
+        permiso['fechaSolicitud'];
     return _mismaFecha(fechaPermiso, fechaRegistro);
   }
 
@@ -253,13 +340,18 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
     List<Map<String, dynamic>> permisosAprobados,
   ) {
     final estadoBase = (data['estado'] ?? '-').toString();
+    final estadoVisiblePersistido = (data['estado_visible'] ?? '')
+        .toString()
+        .trim();
     if (estadoBase != 'Atraso' && estadoBase != 'Salida Anticipada') {
-      return estadoBase;
+      return estadoVisiblePersistido.isNotEmpty
+          ? estadoVisiblePersistido
+          : estadoBase;
     }
 
-    final permisosRelacionados = permisosAprobados.where(
-      (permiso) => _permisoRelacionadoMismaFecha(data, permiso),
-    ).toList();
+    final permisosRelacionados = permisosAprobados
+        .where((permiso) => _permisoRelacionadoMismaFecha(data, permiso))
+        .toList();
 
     if (permisosRelacionados.isEmpty) {
       return estadoBase;
@@ -287,41 +379,46 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
   }) {
     final int numMes = mesesMap[mesSeleccionado] ?? 4;
 
-    return docs.where((doc) {
-      final data = doc.data() as Map<String, dynamic>;
-      if (data['fecha'] == null || data['fecha'] is! Timestamp) {
-        return false;
-      }
+    return docs
+        .where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          if (data['fecha'] == null || data['fecha'] is! Timestamp) {
+            return false;
+          }
 
-      final fecha = (data['fecha'] as Timestamp).toDate();
-      final coincidePeriodo =
-          fecha.month == numMes && fecha.year == anioSeleccionado;
+          final fecha = (data['fecha'] as Timestamp).toDate();
+          final coincidePeriodo =
+              fecha.month == numMes && fecha.year == anioSeleccionado;
 
-      if (!coincidePeriodo) return false;
+          if (!coincidePeriodo) return false;
 
-      if (!_registroPerteneceASede(
-        data,
-        nombresPermitidos: nombresPermitidos,
-      )) {
-        return false;
-      }
+          if (!_registroPerteneceASede(
+            data,
+            nombresPermitidos: nombresPermitidos,
+          )) {
+            return false;
+          }
 
-      final estadoVisible = _resolverEstadoVisible(data, permisosAprobados);
+          final estadoVisible = _resolverEstadoVisible(data, permisosAprobados);
 
-      if (estadoSeleccionado == 'Todos') return true;
+          if (estadoSeleccionado == 'Todos') return true;
 
-      return estadoVisible == estadoSeleccionado;
-    }).map((doc) {
-      final data = doc.data() as Map<String, dynamic>;
-      return _ReporteAsistenciaItem(
-        doc: doc,
-        data: data,
-        estadoVisible: _resolverEstadoVisible(data, permisosAprobados),
-      );
-    }).toList();
+          return estadoVisible == estadoSeleccionado;
+        })
+        .map((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          return _ReporteAsistenciaItem(
+            doc: doc,
+            data: data,
+            estadoVisible: _resolverEstadoVisible(data, permisosAprobados),
+          );
+        })
+        .toList();
   }
 
-  Future<void> descargarReporte(List<_ReporteAsistenciaItem> asistencias) async {
+  Future<void> descargarReporte(
+    List<_ReporteAsistenciaItem> asistencias,
+  ) async {
     final pdf = pw.Document();
 
     final ByteData image = await rootBundle.load(_logoAsset);
@@ -351,10 +448,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
                       fontWeight: pw.FontWeight.bold,
                     ),
                   ),
-                  pw.Text(
-                    _sedeNombre,
-                    style: const pw.TextStyle(fontSize: 10),
-                  ),
+                  pw.Text(_sedeNombre, style: const pw.TextStyle(fontSize: 10)),
                 ],
               ),
             ],
@@ -362,21 +456,18 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
           pw.SizedBox(height: 10),
           pw.Divider(
             thickness: 1,
-            color: PdfColor.fromInt(_primaryColor.value),
+            color: PdfColor.fromInt(_primaryColor.toARGB32()),
           ),
           pw.SizedBox(height: 10),
           pw.Center(
             child: pw.Text(
               'REPORTE MENSUAL DE ASISTENCIA',
-              style: pw.TextStyle(
-                fontSize: 14,
-                fontWeight: pw.FontWeight.bold,
-              ),
+              style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
             ),
           ),
           pw.Center(
             child: pw.Text(
-              'Periodo: $mesSeleccionado $anioSeleccionado | Estado: $estadoSeleccionado',
+              'Periodo: $mesSeleccionado $anioSeleccionado | Estado: ${_estadoFiltroLabel(estadoSeleccionado)}',
               style: const pw.TextStyle(fontSize: 11),
             ),
           ),
@@ -387,7 +478,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
               fontWeight: pw.FontWeight.bold,
             ),
             headerDecoration: pw.BoxDecoration(
-              color: PdfColor.fromInt(_primaryColor.value),
+              color: PdfColor.fromInt(_primaryColor.toARGB32()),
             ),
             cellHeight: 30,
             cellAlignments: {
@@ -404,8 +495,9 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
 
                 String fechaStr = '--/--/----';
                 if (data['fecha'] != null && data['fecha'] is Timestamp) {
-                  fechaStr = DateFormat('dd/MM/yyyy')
-                      .format((data['fecha'] as Timestamp).toDate());
+                  fechaStr = DateFormat(
+                    'dd/MM/yyyy',
+                  ).format((data['fecha'] as Timestamp).toDate());
                 }
 
                 return [
@@ -454,12 +546,14 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
       xls.CellIndex.indexByString('E3'),
     );
 
-    sheet.cell(xls.CellIndex.indexByString('A1')).value =
-        xls.TextCellValue(_tituloSistema.toUpperCase());
-    sheet.cell(xls.CellIndex.indexByString('A2')).value =
-        xls.TextCellValue('REPORTE MENSUAL DE ASISTENCIA');
+    sheet.cell(xls.CellIndex.indexByString('A1')).value = xls.TextCellValue(
+      _tituloSistema.toUpperCase(),
+    );
+    sheet.cell(xls.CellIndex.indexByString('A2')).value = xls.TextCellValue(
+      'REPORTE MENSUAL DE ASISTENCIA',
+    );
     sheet.cell(xls.CellIndex.indexByString('A3')).value = xls.TextCellValue(
-      'Sede: $_sedeNombre | Periodo: $mesSeleccionado $anioSeleccionado | Estado: $estadoSeleccionado',
+      'Sede: $_sedeNombre | Periodo: $mesSeleccionado $anioSeleccionado | Estado: ${_estadoFiltroLabel(estadoSeleccionado)}',
     );
 
     final titleStyle = xls.CellStyle(
@@ -468,7 +562,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
       horizontalAlign: xls.HorizontalAlign.Center,
       verticalAlign: xls.VerticalAlign.Center,
       backgroundColorHex: xls.ExcelColor.fromHexString(
-        '#${_excelHeaderColor.value.toRadixString(16).substring(2).toUpperCase()}',
+        _excelHex(_excelHeaderColor),
       ),
       fontColorHex: xls.ExcelColor.white,
     );
@@ -478,7 +572,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
       horizontalAlign: xls.HorizontalAlign.Center,
       verticalAlign: xls.VerticalAlign.Center,
       backgroundColorHex: xls.ExcelColor.fromHexString(
-        '#${_secondaryColor.value.toRadixString(16).substring(2).toUpperCase()}',
+        _excelHex(_secondaryColor),
       ),
       fontColorHex: xls.ExcelColor.white,
     );
@@ -488,7 +582,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
       horizontalAlign: xls.HorizontalAlign.Center,
       verticalAlign: xls.VerticalAlign.Center,
       backgroundColorHex: xls.ExcelColor.fromHexString(
-        '#${_excelSoftColor.value.toRadixString(16).substring(2).toUpperCase()}',
+        _excelHex(_excelSoftColor),
       ),
       fontColorHex: xls.ExcelColor.fromHexString('FF4A4A4A'),
     );
@@ -508,7 +602,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
         bold: true,
         fontColorHex: xls.ExcelColor.white,
         backgroundColorHex: xls.ExcelColor.fromHexString(
-          '#${_excelHeaderColor.value.toRadixString(16).substring(2).toUpperCase()}',
+          _excelHex(_excelHeaderColor),
         ),
         horizontalAlign: xls.HorizontalAlign.Center,
         verticalAlign: xls.VerticalAlign.Center,
@@ -526,8 +620,9 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
 
       String fechaStr = '--/--/----';
       if (data['fecha'] != null && data['fecha'] is Timestamp) {
-        fechaStr = DateFormat('dd/MM/yyyy')
-            .format((data['fecha'] as Timestamp).toDate());
+        fechaStr = DateFormat(
+          'dd/MM/yyyy',
+        ).format((data['fecha'] as Timestamp).toDate());
       }
 
       final values = [
@@ -548,12 +643,11 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
         cell.value = xls.TextCellValue(values[col]);
         cell.cellStyle = xls.CellStyle(
           backgroundColorHex: xls.ExcelColor.fromHexString(
-            i.isEven
-                ? '#FFFFFF'
-                : '#${_excelSoftColor.value.toRadixString(16).substring(2).toUpperCase()}',
+            i.isEven ? '#FFFFFF' : _excelHex(_excelSoftColor),
           ),
-          horizontalAlign:
-              col == 0 ? xls.HorizontalAlign.Left : xls.HorizontalAlign.Center,
+          horizontalAlign: col == 0
+              ? xls.HorizontalAlign.Left
+              : xls.HorizontalAlign.Center,
           verticalAlign: xls.VerticalAlign.Center,
           leftBorder: xls.Border(borderStyle: xls.BorderStyle.Thin),
           rightBorder: xls.Border(borderStyle: xls.BorderStyle.Thin),
@@ -572,15 +666,10 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
     final bytes = excel.encode();
     if (bytes == null) return;
 
-    final blob = html.Blob(
-      [Uint8List.fromList(bytes)],
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    await descargarExcelEnNavegador(
+      bytes,
+      'Reporte_Asistencia_${mesSeleccionado}_$anioSeleccionado.xlsx',
     );
-    final url = html.Url.createObjectUrlFromBlob(blob);
-    html.AnchorElement(href: url)
-      ..download = 'Reporte_Asistencia_${mesSeleccionado}_$anioSeleccionado.xlsx'
-      ..click();
-    html.Url.revokeObjectUrl(url);
   }
 
   @override
@@ -588,9 +677,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFB),
       body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('asistencias_realizadas')
-            .snapshots(),
+        stream: _asistenciasStream,
         builder: (context, asistenciasSnapshot) {
           if (asistenciasSnapshot.hasError) {
             return const Center(child: Text('Error de conexion'));
@@ -600,7 +687,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
           }
 
           return StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance.collection('usuarios').snapshots(),
+            stream: _usuariosStream,
             builder: (context, usuariosSnapshot) {
               if (usuariosSnapshot.hasError) {
                 return const Center(
@@ -616,10 +703,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
               );
 
               return StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('solicitudes')
-                    .where('estado', isEqualTo: 'aprobado')
-                    .snapshots(),
+                stream: _solicitudesStream,
                 builder: (context, solicitudesSnapshot) {
                   if (solicitudesSnapshot.hasError) {
                     return const Center(
@@ -630,13 +714,9 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
                     return const Center(child: CircularProgressIndicator());
                   }
 
-                  final permisosAprobados = solicitudesSnapshot.data!.docs
-                      .map((doc) => doc.data() as Map<String, dynamic>)
-                      .where((data) {
-                        return _matchesCurrentSede(data) &&
-                            _normalizarTexto(data['tipo']) == 'permiso';
-                      })
-                      .toList();
+                  final permisosAprobados = _extraerPermisosAprobadosFiltrados(
+                    solicitudesSnapshot.data!.docs,
+                  );
 
                   final registrosFiltrados = _filtrarRegistros(
                     asistenciasSnapshot.data!.docs,
@@ -671,6 +751,12 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
               item.estadoVisible == 'Retraso con permiso',
         )
         .length;
+    final salidasAutorizadas = registrosFiltrados
+        .where((item) => item.estadoVisible == 'Salida anticipada autorizada')
+        .length;
+    final salidasConRetraso = registrosFiltrados
+        .where((item) => item.estadoVisible == 'Salida con retraso')
+        .length;
     final completos = registrosFiltrados
         .where((item) => item.estadoVisible == 'Completada')
         .length;
@@ -683,487 +769,461 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
         return SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: ConstrainedBox(
-            constraints: BoxConstraints(
-              minHeight: constraints.maxHeight - 48,
-            ),
+            constraints: BoxConstraints(minHeight: constraints.maxHeight - 48),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(26),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  _secondaryColor,
-                  _primaryColor,
-                  _primaryColor.withOpacity(0.82),
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(28),
-              border: Border.all(color: _primaryColor.withOpacity(0.24)),
-              boxShadow: [
-                BoxShadow(
-                  color: _primaryColor.withOpacity(0.18),
-                  blurRadius: 24,
-                  offset: const Offset(0, 12),
-                ),
-              ],
-            ),
-            child: Wrap(
-              alignment: WrapAlignment.spaceBetween,
-              runSpacing: 18,
-              children: [
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 720),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.14),
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(color: Colors.white24),
-                        ),
-                        child: Text(
-                          _sedeNombre,
-                          style: const TextStyle(
+                BootstrapAdminHero(
+                  branding: _branding,
+                  icon: Icons.summarize_rounded,
+                  eyebrow: _sedeNombre,
+                  title: 'Reportes de asistencia',
+                  subtitle:
+                      'Consulta mensual de marcaciones, atrasos y registros completados con una vista clara y adaptada a $_sedeNombre.',
+                  trailing: Container(
+                    width: 260,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(color: Colors.white24),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Resumen del periodo',
+                          style: TextStyle(
                             color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 18),
-                      const Text(
-                        'Reportes de asistencia',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 32,
-                          fontWeight: FontWeight.w800,
-                          height: 1.05,
+                        const SizedBox(height: 12),
+                        _buildHeroMetric(
+                          label: 'Registros',
+                          value: '${registrosFiltrados.length}',
                         ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        'Consulta mensual de marcaciones, atrasos y registros completados con una vista adaptada a $_sedeNombre.',
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.9),
-                          fontSize: 14,
-                          height: 1.5,
-                          fontWeight: FontWeight.w500,
+                        const SizedBox(height: 10),
+                        _buildHeroMetric(
+                          label: 'Atrasos',
+                          value: '$atrasos',
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 10),
+                        _buildHeroMetric(
+                          label: 'Con permiso',
+                          value: '$conPermiso',
+                        ),
+                        const SizedBox(height: 10),
+                        _buildHeroMetric(
+                          label: 'Salidas autorizadas',
+                          value: '$salidasAutorizadas',
+                        ),
+                        const SizedBox(height: 10),
+                        _buildHeroMetric(
+                          label: 'Salidas con retraso',
+                          value: '$salidasConRetraso',
+                        ),
+                        const SizedBox(height: 10),
+                        _buildHeroMetric(
+                          label: 'Completadas',
+                          value: '$completos',
+                        ),
+                      ],
+                    ),
                   ),
                 ),
+                if (mostrarAvisoSede) ...[
+                  const SizedBox(height: 16),
+                  BootstrapAdminAlertBar(
+                    icon: Icons.location_city_outlined,
+                    message: 'Mostrando solo registros de $_sedeNombre.',
+                    accentColor: _primaryColor,
+                    backgroundColor: _excelSoftColor,
+                  ),
+                ],
+                const SizedBox(height: 20),
                 Container(
-                  width: 260,
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: Colors.white24),
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(22),
+                    border: Border.all(
+                      color: _primaryColor.withValues(alpha: 0.20),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: _primaryColor.withValues(alpha: 0.08),
+                        blurRadius: 16,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Resumen del periodo',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      _buildHeroMetric(label: 'Registros', value: '${registrosFiltrados.length}'),
-                      const SizedBox(height: 10),
-                      _buildHeroMetric(label: 'Atrasos', value: '$atrasos'),
-                      const SizedBox(height: 10),
-                      _buildHeroMetric(label: 'Con permiso', value: '$conPermiso'),
-                      const SizedBox(height: 10),
-                      _buildHeroMetric(label: 'Completadas', value: '$completos'),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (mostrarAvisoSede) ...[
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-              decoration: BoxDecoration(
-                color: _excelSoftColor,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: _primaryColor.withOpacity(0.24)),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.location_city_outlined,
-                    color: _primaryColor,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Mostrando solo registros de $_sedeNombre.',
-                      style: TextStyle(
-                        color: _primaryColor,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-          const SizedBox(height: 20),
-          Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: _primaryColor.withOpacity(0.20)),
-              boxShadow: [
-                BoxShadow(
-                  color: _primaryColor.withOpacity(0.08),
-                  blurRadius: 16,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: _primaryColor.withOpacity(0.10),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: Icon(
-                        Icons.tune_rounded,
-                        color: _primaryColor,
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      Row(
                         children: [
-                          Text(
-                            'Filtros del reporte',
-                            style: TextStyle(
-                              color: Colors.black87,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
+                          Container(
+                            width: 48,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              color: _primaryColor.withValues(alpha: 0.10),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Icon(
+                              Icons.tune_rounded,
+                              color: _primaryColor,
                             ),
                           ),
-                          SizedBox(height: 4),
-                          Text(
-                            'Ajusta mes, año y estado antes de exportar o revisar la tabla.',
-                            style: TextStyle(
-                              color: Color(0xFF6B7280),
-                              fontSize: 12,
-                              height: 1.4,
-                              fontWeight: FontWeight.w500,
+                          const SizedBox(width: 14),
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Filtros del reporte',
+                                  style: TextStyle(
+                                    color: Colors.black87,
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                SizedBox(height: 4),
+                                Text(
+                                  'Ajusta mes, año y estado antes de exportar o revisar la tabla.',
+                                  style: TextStyle(
+                                    color: Color(0xFF6B7280),
+                                    fontSize: 12,
+                                    height: 1.4,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ],
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                Wrap(
-                  spacing: 16,
-                  runSpacing: 14,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    _buildFilterField(
-                      label: 'Mes',
-                      icon: Icons.calendar_month_outlined,
-                      child: DropdownButton<String>(
-                        value: mesSeleccionado,
-                        isDense: true,
-                        underline: const SizedBox(),
-                        items: meses
-                            .map((m) => DropdownMenuItem(
-                                  value: m,
-                                  child: Text(m),
-                                ))
-                            .toList(),
-                        onChanged: (val) => setState(() => mesSeleccionado = val!),
-                      ),
-                    ),
-                    _buildFilterField(
-                      label: 'Año',
-                      icon: Icons.event_note_outlined,
-                      child: DropdownButton<int>(
-                        value: anioSeleccionado,
-                        isDense: true,
-                        underline: const SizedBox(),
-                        items: [2024, 2025, 2026]
-                            .map((a) => DropdownMenuItem(
-                                  value: a,
-                                  child: Text(a.toString()),
-                                ))
-                            .toList(),
-                        onChanged: (val) => setState(() => anioSeleccionado = val!),
-                      ),
-                    ),
-                    _buildFilterField(
-                      label: 'Estado',
-                      icon: Icons.flag_outlined,
-                      child: DropdownButton<String>(
-                        value: estadoSeleccionado,
-                        isDense: true,
-                        underline: const SizedBox(),
-                        items: estados
-                            .map((e) => DropdownMenuItem(
-                                  value: e,
-                                  child: Text(e),
-                                ))
-                            .toList(),
-                        onChanged: (val) => setState(() => estadoSeleccionado = val!),
-                      ),
-                    ),
-                    FilledButton.icon(
-                      onPressed: () => descargarExcel(registrosFiltrados),
-                      icon: const Icon(Icons.table_view_rounded, size: 18),
-                      label: const Text('Descargar Excel'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF2E7D32),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 18,
-                          vertical: 16,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                      ),
-                    ),
-                    FilledButton.icon(
-                      onPressed: () => descargarReporte(registrosFiltrados),
-                      icon: const Icon(Icons.picture_as_pdf, size: 18),
-                      label: const Text('Descargar PDF'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFFD32F2F),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 18,
-                          vertical: 16,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 18),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final width = constraints.maxWidth;
-              final chipWidth = width < 700
-                  ? (width - 14) / 2
-                  : width < 1100
-                      ? (width - 28) / 3
-                      : (width - 42) / 4;
-
-              return Wrap(
-                spacing: 14,
-                runSpacing: 14,
-                children: [
-                  _buildSummaryChip(
-                    label: 'Total',
-                    value: '${registrosFiltrados.length}',
-                    color: _primaryColor,
-                    width: chipWidth,
-                  ),
-                  _buildSummaryChip(
-                    label: 'Entradas',
-                    value: '$entradas',
-                    color: _secondaryColor,
-                    width: chipWidth,
-                  ),
-                  _buildSummaryChip(
-                    label: 'Atrasos',
-                    value: '$atrasos',
-                    color: const Color(0xFFD32F2F),
-                    width: chipWidth,
-                  ),
-                  _buildSummaryChip(
-                    label: 'Con permiso',
-                    value: '$conPermiso',
-                    color: const Color(0xFF00897B),
-                    width: chipWidth,
-                  ),
-                  _buildSummaryChip(
-                    label: 'Completadas',
-                    value: '$completos',
-                    color: const Color(0xFF2E7D32),
-                    width: chipWidth,
-                  ),
-                ],
-              );
-            },
-          ),
-          const SizedBox(height: 18),
-          Container(
-            width: double.infinity,
-            constraints: const BoxConstraints(minHeight: 320),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: _primaryColor.withOpacity(0.20)),
-              boxShadow: [
-                BoxShadow(
-                  color: _primaryColor.withOpacity(0.08),
-                  blurRadius: 16,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: registrosFiltrados.isEmpty
-                ? _buildEmptyState()
-                : LayoutBuilder(
-                    builder: (context, constraints) {
-                      const columnSpacing = 36.0;
-                      const horizontalMargin = 18.0;
-                      const minDocente = 240.0;
-                      const minFecha = 130.0;
-                      const minTipo = 120.0;
-                      const minEstado = 150.0;
-                      const minHora = 100.0;
-                      final usableWidth = constraints.maxWidth - 32;
-                      final minTableWidth = minDocente +
-                          minFecha +
-                          minTipo +
-                          minEstado +
-                          minHora +
-                          (columnSpacing * 4) +
-                          (horizontalMargin * 2);
-                      final tableWidth =
-                          usableWidth > minTableWidth ? usableWidth : minTableWidth;
-                      final contentWidth =
-                          tableWidth - (columnSpacing * 4) - (horizontalMargin * 2);
-                      final docenteWidth = contentWidth * 0.34;
-                      final fechaWidth = contentWidth * 0.16;
-                      final tipoWidth = contentWidth * 0.15;
-                      final estadoWidth = contentWidth * 0.20;
-                      final horaWidth = contentWidth * 0.15;
-
-                      return ClipRRect(
-                        borderRadius: BorderRadius.circular(24),
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.all(16),
-                          child: SizedBox(
-                            width: tableWidth,
-                            child: DataTableTheme(
-                              data: DataTableThemeData(
-                                headingRowColor: MaterialStatePropertyAll(
-                                  _excelSoftColor.withOpacity(0.85),
-                                ),
-                                headingTextStyle: TextStyle(
-                                  color: _secondaryColor,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 14,
-                                ),
-                                dataTextStyle: const TextStyle(
-                                  color: Colors.black87,
-                                  fontWeight: FontWeight.w500,
-                                  fontSize: 14,
-                                ),
-                                dividerThickness: 0.7,
-                                headingRowHeight: 62,
-                                dataRowMinHeight: 68,
-                                dataRowMaxHeight: 76,
+                      const SizedBox(height: 18),
+                      Wrap(
+                        spacing: 16,
+                        runSpacing: 14,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          _buildFilterField(
+                            label: 'Mes',
+                            icon: Icons.calendar_month_outlined,
+                            child: DropdownButton<String>(
+                              value: mesSeleccionado,
+                              isDense: true,
+                              underline: const SizedBox(),
+                              items: meses
+                                  .map(
+                                    (m) => DropdownMenuItem(
+                                      value: m,
+                                      child: Text(m),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: (val) =>
+                                  setState(() => mesSeleccionado = val!),
+                            ),
+                          ),
+                          _buildFilterField(
+                            label: 'Año',
+                            icon: Icons.event_note_outlined,
+                            child: DropdownButton<int>(
+                              value: anioSeleccionado,
+                              isDense: true,
+                              underline: const SizedBox(),
+                              items: [2024, 2025, 2026]
+                                  .map(
+                                    (a) => DropdownMenuItem(
+                                      value: a,
+                                      child: Text(a.toString()),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: (val) =>
+                                  setState(() => anioSeleccionado = val!),
+                            ),
+                          ),
+                          _buildFilterField(
+                            label: 'Estado',
+                            icon: Icons.flag_outlined,
+                            child: DropdownButton<String>(
+                              value: estadoSeleccionado,
+                              isDense: true,
+                              underline: const SizedBox(),
+                              items: estados
+                                  .map(
+                                    (e) => DropdownMenuItem(
+                                      value: e,
+                                      child: Text(_estadoFiltroLabel(e)),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: (val) =>
+                                  setState(() => estadoSeleccionado = val!),
+                            ),
+                          ),
+                          FilledButton.icon(
+                            onPressed: () => descargarExcel(registrosFiltrados),
+                            icon: const Icon(
+                              Icons.table_view_rounded,
+                              size: 18,
+                            ),
+                            label: const Text('Descargar Excel'),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFF2E7D32),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 18,
+                                vertical: 16,
                               ),
-                              child: DataTable(
-                                columnSpacing: columnSpacing,
-                                horizontalMargin: horizontalMargin,
-                                columns: [
-                                  _buildWideColumn('Docente', docenteWidth),
-                                  _buildWideColumn('Fecha', fechaWidth),
-                                  _buildWideColumn('Tipo', tipoWidth),
-                                  _buildWideColumn('Estado', estadoWidth),
-                                  _buildWideColumn('Hora', horaWidth),
-                                ],
-                                rows: registrosFiltrados.map((item) {
-                                  final data = item.data;
-                                  final fecha = data['fecha'] != null
-                                      ? (data['fecha'] as Timestamp).toDate()
-                                      : null;
-                                  final estado = item.estadoVisible;
-
-                                  return DataRow(
-                                    cells: [
-                                      DataCell(
-                                        _buildWideCell(
-                                          (data['docente'] ?? 'N/A').toString(),
-                                          docenteWidth,
-                                        ),
-                                      ),
-                                      DataCell(
-                                        _buildWideCell(
-                                          fecha != null
-                                              ? DateFormat('dd/MM/yyyy')
-                                                  .format(fecha)
-                                              : '--',
-                                          fechaWidth,
-                                        ),
-                                      ),
-                                      DataCell(
-                                        _buildWideCell(
-                                          (data['tipo'] ?? '-').toString(),
-                                          tipoWidth,
-                                        ),
-                                      ),
-                                      DataCell(
-                                        SizedBox(
-                                          width: estadoWidth,
-                                          child: Align(
-                                            alignment: Alignment.centerLeft,
-                                            child: _buildStatusChip(estado),
-                                          ),
-                                        ),
-                                      ),
-                                      DataCell(
-                                        _buildWideCell(
-                                          (data['hora_marcada'] ?? '--:--')
-                                              .toString(),
-                                          horaWidth,
-                                        ),
-                                      ),
-                                    ],
-                                  );
-                                }).toList(),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
                               ),
                             ),
                           ),
-                        ),
-                      );
-                    },
+                          FilledButton.icon(
+                            onPressed: () =>
+                                descargarReporte(registrosFiltrados),
+                            icon: const Icon(Icons.picture_as_pdf, size: 18),
+                            label: const Text('Descargar PDF'),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFFD32F2F),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 18,
+                                vertical: 16,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-          ),
+                ),
+                const SizedBox(height: 18),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final width = constraints.maxWidth;
+                    final chipWidth = width < 700
+                        ? (width - 14) / 2
+                        : width < 1100
+                        ? (width - 28) / 3
+                        : (width - 42) / 4;
+
+                    return Wrap(
+                      spacing: 14,
+                      runSpacing: 14,
+                      children: [
+                        _buildSummaryChip(
+                          label: 'Total',
+                          value: '${registrosFiltrados.length}',
+                          color: _primaryColor,
+                          width: chipWidth,
+                        ),
+                        _buildSummaryChip(
+                          label: 'Entradas',
+                          value: '$entradas',
+                          color: _secondaryColor,
+                          width: chipWidth,
+                        ),
+                        _buildSummaryChip(
+                          label: 'Atrasos',
+                          value: '$atrasos',
+                          color: const Color(0xFFD32F2F),
+                          width: chipWidth,
+                        ),
+                        _buildSummaryChip(
+                          label: 'Con permiso',
+                          value: '$conPermiso',
+                          color: const Color(0xFF00897B),
+                          width: chipWidth,
+                        ),
+                        _buildSummaryChip(
+                          label: 'Salidas autorizadas',
+                          value: '$salidasAutorizadas',
+                          color: const Color(0xFF5E35B1),
+                          width: chipWidth,
+                        ),
+                        _buildSummaryChip(
+                          label: 'Salidas con retraso',
+                          value: '$salidasConRetraso',
+                          color: const Color(0xFF8D6E63),
+                          width: chipWidth,
+                        ),
+                        _buildSummaryChip(
+                          label: 'Completadas',
+                          value: '$completos',
+                          color: const Color(0xFF2E7D32),
+                          width: chipWidth,
+                        ),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 18),
+                Container(
+                  width: double.infinity,
+                  constraints: const BoxConstraints(minHeight: 320),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(
+                      color: _primaryColor.withValues(alpha: 0.20),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: _primaryColor.withValues(alpha: 0.08),
+                        blurRadius: 16,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  child: registrosFiltrados.isEmpty
+                      ? _buildEmptyState()
+                      : LayoutBuilder(
+                          builder: (context, constraints) {
+                            const columnSpacing = 36.0;
+                            const horizontalMargin = 18.0;
+                            const minDocente = 240.0;
+                            const minFecha = 130.0;
+                            const minTipo = 120.0;
+                            const minEstado = 150.0;
+                            const minHora = 100.0;
+                            final usableWidth = constraints.maxWidth - 32;
+                            final minTableWidth =
+                                minDocente +
+                                minFecha +
+                                minTipo +
+                                minEstado +
+                                minHora +
+                                (columnSpacing * 4) +
+                                (horizontalMargin * 2);
+                            final tableWidth = usableWidth > minTableWidth
+                                ? usableWidth
+                                : minTableWidth;
+                            final contentWidth =
+                                tableWidth -
+                                (columnSpacing * 4) -
+                                (horizontalMargin * 2);
+                            final docenteWidth = contentWidth * 0.34;
+                            final fechaWidth = contentWidth * 0.16;
+                            final tipoWidth = contentWidth * 0.15;
+                            final estadoWidth = contentWidth * 0.20;
+                            final horaWidth = contentWidth * 0.15;
+
+                            return ClipRRect(
+                              borderRadius: BorderRadius.circular(24),
+                              child: SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                padding: const EdgeInsets.all(16),
+                                child: SizedBox(
+                                  width: tableWidth,
+                                  child: DataTableTheme(
+                                    data: DataTableThemeData(
+                                      headingRowColor: WidgetStatePropertyAll(
+                                        _excelSoftColor.withValues(alpha: 0.85),
+                                      ),
+                                      headingTextStyle: TextStyle(
+                                        color: _secondaryColor,
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 14,
+                                      ),
+                                      dataTextStyle: const TextStyle(
+                                        color: Colors.black87,
+                                        fontWeight: FontWeight.w500,
+                                        fontSize: 14,
+                                      ),
+                                      dividerThickness: 0.7,
+                                      headingRowHeight: 62,
+                                      dataRowMinHeight: 68,
+                                      dataRowMaxHeight: 76,
+                                    ),
+                                    child: DataTable(
+                                      columnSpacing: columnSpacing,
+                                      horizontalMargin: horizontalMargin,
+                                      columns: [
+                                        _buildWideColumn(
+                                          'Docente',
+                                          docenteWidth,
+                                        ),
+                                        _buildWideColumn('Fecha', fechaWidth),
+                                        _buildWideColumn('Tipo', tipoWidth),
+                                        _buildWideColumn('Estado', estadoWidth),
+                                        _buildWideColumn('Hora', horaWidth),
+                                      ],
+                                      rows: registrosFiltrados.map((item) {
+                                        final data = item.data;
+                                        final fecha = data['fecha'] != null
+                                            ? (data['fecha'] as Timestamp)
+                                                  .toDate()
+                                            : null;
+                                        final estado = item.estadoVisible;
+
+                                        return DataRow(
+                                          cells: [
+                                            DataCell(
+                                              _buildWideCell(
+                                                (data['docente'] ?? 'N/A')
+                                                    .toString(),
+                                                docenteWidth,
+                                              ),
+                                            ),
+                                            DataCell(
+                                              _buildWideCell(
+                                                fecha != null
+                                                    ? DateFormat(
+                                                        'dd/MM/yyyy',
+                                                      ).format(fecha)
+                                                    : '--',
+                                                fechaWidth,
+                                              ),
+                                            ),
+                                            DataCell(
+                                              _buildWideCell(
+                                                (data['tipo'] ?? '-')
+                                                    .toString(),
+                                                tipoWidth,
+                                              ),
+                                            ),
+                                            DataCell(
+                                              SizedBox(
+                                                width: estadoWidth,
+                                                child: Align(
+                                                  alignment:
+                                                      Alignment.centerLeft,
+                                                  child: _buildStatusChip(
+                                                    estado,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                            DataCell(
+                                              _buildWideCell(
+                                                (data['hora_marcada'] ??
+                                                        '--:--')
+                                                    .toString(),
+                                                horaWidth,
+                                              ),
+                                            ),
+                                          ],
+                                        );
+                                      }).toList(),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
               ],
             ),
           ),
@@ -1172,14 +1232,11 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
     );
   }
 
-  Widget _buildHeroMetric({
-    required String label,
-    required String value,
-  }) {
+  Widget _buildHeroMetric({required String label, required String value}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.10),
+        color: Colors.white.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Row(
@@ -1215,9 +1272,9 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: _excelSoftColor.withOpacity(0.55),
+        color: _excelSoftColor.withValues(alpha: 0.55),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _primaryColor.withOpacity(0.24)),
+        border: Border.all(color: _primaryColor.withValues(alpha: 0.24)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1248,9 +1305,9 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
       constraints: const BoxConstraints(minHeight: 90),
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withOpacity(0.26)),
+        border: Border.all(color: color.withValues(alpha: 0.26)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1259,7 +1316,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
             width: 42,
             height: 42,
             decoration: BoxDecoration(
-              color: color.withOpacity(0.12),
+              color: color.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(Icons.insights_outlined, color: color, size: 20),
@@ -1300,15 +1357,17 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
       'Completada' => const Color(0xFF2E7D32),
       'A tiempo' => const Color(0xFF1565C0),
       'Salida Anticipada' => const Color(0xFFEF6C00),
+      'Salida con retraso' => const Color(0xFF8D6E63),
+      'Salida anticipada autorizada' => const Color(0xFF5E35B1),
       _ => Colors.black87,
     };
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withOpacity(0.22)),
+        border: Border.all(color: color.withValues(alpha: 0.22)),
       ),
       child: Text(
         estado,
@@ -1323,10 +1382,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
 
   DataColumn _buildWideColumn(String label, double width) {
     return DataColumn(
-      label: SizedBox(
-        width: width,
-        child: Text(label),
-      ),
+      label: SizedBox(width: width, child: Text(label)),
     );
   }
 
@@ -1335,10 +1391,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
       width: width,
       child: Text(
         text,
-        style: const TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w500,
-        ),
+        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
       ),
     );
   }
@@ -1357,11 +1410,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
                 color: _excelSoftColor,
                 borderRadius: BorderRadius.circular(22),
               ),
-              child: Icon(
-                Icons.inbox_outlined,
-                color: _primaryColor,
-                size: 34,
-              ),
+              child: Icon(Icons.inbox_outlined, color: _primaryColor, size: 34),
             ),
             const SizedBox(height: 16),
             Text(

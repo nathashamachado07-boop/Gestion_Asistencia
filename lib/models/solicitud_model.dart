@@ -10,11 +10,12 @@ class Solicitud {
   String estado; // 'pendiente', 'aprobado', 'rechazado'
 
   // --- CAMPOS PARA PERMISOS Y VACACIONES ---
-  String? horasPermiso;    
-  String? descontarDe;     
-  int? diasDisponibles;    
-  int? diasATomar;         
-  DateTime? fechaSolicitud; 
+  String? horasPermiso;
+  String? horarioPermiso;
+  String? descontarDe;
+  int? diasDisponibles;
+  int? diasATomar;
+  DateTime? fechaSolicitud;
   int? anioVacaciones;
   int? diasAcumulados;
   int? saldoDias;
@@ -33,6 +34,7 @@ class Solicitud {
     required this.fechaFin,
     this.estado = 'pendiente',
     this.horasPermiso,
+    this.horarioPermiso,
     this.descontarDe,
     this.diasDisponibles,
     this.diasATomar,
@@ -60,7 +62,7 @@ class Solicitud {
     'diasATomar': diasATomar,
     'fechaSolicitud': fechaSolicitud ?? DateTime.now(),
     'fechaPermiso': tipo == 'Permiso' ? fechaInicio : null,
-    'horarioPermiso': horasPermiso,
+    'horarioPermiso': horarioPermiso ?? horasPermiso,
     'anioVacaciones':
         tipo == 'Vacaciones' ? (anioVacaciones ?? fechaInicio.year) : null,
     'diasAcumulados':
@@ -87,6 +89,7 @@ class Solicitud {
       fechaFin: (map['fechaFin'] as Timestamp).toDate(),
       estado: map['estado'] ?? 'pendiente',
       horasPermiso: map['horasPermiso'],
+      horarioPermiso: map['horarioPermiso']?.toString(),
       descontarDe: map['descontarDe'],
       diasDisponibles: map['diasDisponibles'],
       diasATomar: map['diasATomar'],

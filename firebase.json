@@ -32,6 +32,34 @@
         }
       },
       {
+        "source": "/api/registerDigitalCertificate",
+        "function": {
+          "functionId": "registerDigitalCertificate",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "/api/deleteDigitalCertificate",
+        "function": {
+          "functionId": "deleteDigitalCertificate",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "/api/verifyDigitalCertificatePassword",
+        "function": {
+          "functionId": "verifyDigitalCertificatePassword",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "/api/signPdfWithDigitalCertificate",
+        "function": {
+          "functionId": "signPdfWithDigitalCertificate",
+          "region": "us-central1"
+        }
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

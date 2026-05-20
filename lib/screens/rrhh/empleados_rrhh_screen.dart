@@ -31,9 +31,7 @@ class EmpleadosRRHHScreen extends StatelessWidget {
 }
 
 class _EmpleadosSedeDetalle extends StatefulWidget {
-  const _EmpleadosSedeDetalle({
-    required this.option,
-  });
+  const _EmpleadosSedeDetalle({required this.option});
 
   final RRHHSedeOption option;
 
@@ -57,7 +55,9 @@ class _EmpleadosSedeDetalleState extends State<_EmpleadosSedeDetalle> {
     return value?.toString().trim().toLowerCase() ?? '';
   }
 
-  List<QueryDocumentSnapshot> _filtrarUsuarios(List<QueryDocumentSnapshot> docs) {
+  List<QueryDocumentSnapshot> _filtrarUsuarios(
+    List<QueryDocumentSnapshot> docs,
+  ) {
     final busqueda = _normalize(_busquedaController.text);
 
     return docs.where((doc) {
@@ -82,14 +82,13 @@ class _EmpleadosSedeDetalleState extends State<_EmpleadosSedeDetalle> {
       }
 
       return true;
-    }).toList()
-      ..sort((a, b) {
-        final dataA = a.data() as Map<String, dynamic>;
-        final dataB = b.data() as Map<String, dynamic>;
-        final nombreA = (dataA['nombre'] ?? '').toString();
-        final nombreB = (dataB['nombre'] ?? '').toString();
-        return nombreA.compareTo(nombreB);
-      });
+    }).toList()..sort((a, b) {
+      final dataA = a.data() as Map<String, dynamic>;
+      final dataB = b.data() as Map<String, dynamic>;
+      final nombreA = (dataA['nombre'] ?? '').toString();
+      final nombreB = (dataB['nombre'] ?? '').toString();
+      return nombreA.compareTo(nombreB);
+    });
   }
 
   @override
@@ -111,7 +110,9 @@ class _EmpleadosSedeDetalleState extends State<_EmpleadosSedeDetalle> {
         children: [
           _buildBackground(),
           StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance.collection('usuarios').snapshots(),
+            stream: FirebaseFirestore.instance
+                .collection('usuarios')
+                .snapshots(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
@@ -128,7 +129,9 @@ class _EmpleadosSedeDetalleState extends State<_EmpleadosSedeDetalle> {
                     )
                     .where((rol) => rol.trim().isNotEmpty),
               }.toList();
-              final rolValue = roles.contains(_rolFiltro) ? _rolFiltro : 'Todos';
+              final rolValue = roles.contains(_rolFiltro)
+                  ? _rolFiltro
+                  : 'Todos';
               final filtrados = _filtrarUsuarios(usuarios);
 
               return Column(
@@ -168,7 +171,7 @@ class _EmpleadosSedeDetalleState extends State<_EmpleadosSedeDetalle> {
                 colors: [
                   _branding.background,
                   _branding.surface,
-                  _branding.softAccent.withOpacity(0.78),
+                  _branding.softAccent.withValues(alpha: 0.78),
                 ],
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
@@ -248,7 +251,7 @@ class _EmpleadosSedeDetalleState extends State<_EmpleadosSedeDetalle> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.14),
+              color: Colors.white.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(999),
             ),
             child: const Text(
@@ -275,7 +278,7 @@ class _EmpleadosSedeDetalleState extends State<_EmpleadosSedeDetalle> {
           Text(
             'Personal encontrado: $total',
             style: TextStyle(
-              color: Colors.white.withOpacity(0.9),
+              color: Colors.white.withValues(alpha: 0.9),
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -288,12 +291,12 @@ class _EmpleadosSedeDetalleState extends State<_EmpleadosSedeDetalle> {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.84),
+        color: Colors.white.withValues(alpha: 0.84),
         borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: Colors.white.withOpacity(0.9)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.9)),
         boxShadow: [
           BoxShadow(
-            color: _branding.primary.withOpacity(0.08),
+            color: _branding.primary.withValues(alpha: 0.08),
             blurRadius: 16,
             offset: const Offset(0, 8),
           ),
@@ -314,7 +317,7 @@ class _EmpleadosSedeDetalleState extends State<_EmpleadosSedeDetalle> {
           Text(
             'Filtra el personal por nombre, correo o rol con una presentacion mas despejada.',
             style: TextStyle(
-              color: _branding.primaryDark.withOpacity(0.72),
+              color: _branding.primaryDark.withValues(alpha: 0.72),
               height: 1.4,
               fontWeight: FontWeight.w500,
             ),
@@ -327,39 +330,40 @@ class _EmpleadosSedeDetalleState extends State<_EmpleadosSedeDetalle> {
               hintText: 'Buscar por nombre o correo',
               prefixIcon: Icon(Icons.search, color: _branding.primary),
               filled: true,
-              fillColor: Colors.white.withOpacity(0.94),
+              fillColor: Colors.white.withValues(alpha: 0.94),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(20),
                 borderSide: BorderSide.none,
               ),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 18,
+              ),
             ),
           ),
           const SizedBox(height: 14),
           DropdownButtonFormField<String>(
-            value: rolValue,
+            initialValue: rolValue,
             decoration: InputDecoration(
               labelText: 'Rol',
               filled: true,
-              fillColor: Colors.white.withOpacity(0.94),
+              fillColor: Colors.white.withValues(alpha: 0.94),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(20),
                 borderSide: BorderSide.none,
               ),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 16,
+              ),
             ),
             items: roles
                 .map(
-                  (rol) => DropdownMenuItem<String>(
-                    value: rol,
-                    child: Text(rol),
-                  ),
+                  (rol) =>
+                      DropdownMenuItem<String>(value: rol, child: Text(rol)),
                 )
                 .toList(),
-            onChanged: (value) =>
-                setState(() => _rolFiltro = value ?? 'Todos'),
+            onChanged: (value) => setState(() => _rolFiltro = value ?? 'Todos'),
           ),
         ],
       ),
@@ -390,12 +394,12 @@ class _EmpleadosSedeDetalleState extends State<_EmpleadosSedeDetalle> {
       margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.88),
+        color: Colors.white.withValues(alpha: 0.88),
         borderRadius: BorderRadius.circular(26),
-        border: Border.all(color: Colors.white.withOpacity(0.92)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.92)),
         boxShadow: [
           BoxShadow(
-            color: _branding.primary.withOpacity(0.06),
+            color: _branding.primary.withValues(alpha: 0.06),
             blurRadius: 12,
             offset: const Offset(0, 8),
           ),
@@ -411,7 +415,7 @@ class _EmpleadosSedeDetalleState extends State<_EmpleadosSedeDetalle> {
                 width: 52,
                 height: 52,
                 decoration: BoxDecoration(
-                  color: _branding.primary.withOpacity(0.12),
+                  color: _branding.primary.withValues(alpha: 0.12),
                   shape: BoxShape.circle,
                 ),
                 child: Center(
@@ -451,9 +455,12 @@ class _EmpleadosSedeDetalleState extends State<_EmpleadosSedeDetalle> {
               ),
               const SizedBox(width: 8),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
-                  color: badgeColor.withOpacity(0.12),
+                  color: badgeColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
@@ -498,7 +505,7 @@ class _EmpleadosSedeDetalleState extends State<_EmpleadosSedeDetalle> {
                         vertical: 8,
                       ),
                       decoration: BoxDecoration(
-                        color: _branding.surface.withOpacity(0.95),
+                        color: _branding.surface.withValues(alpha: 0.95),
                         borderRadius: BorderRadius.circular(999),
                       ),
                       child: Text(
@@ -523,7 +530,7 @@ class _EmpleadosSedeDetalleState extends State<_EmpleadosSedeDetalle> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: _branding.surface.withOpacity(0.95),
+        color: _branding.surface.withValues(alpha: 0.95),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Row(
@@ -533,10 +540,7 @@ class _EmpleadosSedeDetalleState extends State<_EmpleadosSedeDetalle> {
           const SizedBox(width: 6),
           Text(
             label,
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
           ),
         ],
       ),
@@ -551,7 +555,7 @@ class _EmpleadosSedeDetalleState extends State<_EmpleadosSedeDetalle> {
           Icon(
             Icons.people_outline_rounded,
             size: 78,
-            color: _branding.primary.withOpacity(0.38),
+            color: _branding.primary.withValues(alpha: 0.38),
           ),
           const SizedBox(height: 12),
           const Text(

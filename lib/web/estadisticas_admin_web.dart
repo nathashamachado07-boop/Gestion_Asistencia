@@ -5,6 +5,7 @@ import 'package:table_calendar/table_calendar.dart';
 
 import '../config/app_config.dart';
 import '../models/app_branding.dart';
+import 'bootstrap_admin_ui.dart';
 
 class EstadisticasAdminWeb extends StatelessWidget {
   const EstadisticasAdminWeb({
@@ -38,21 +39,21 @@ class EstadisticasAdminWeb extends StatelessWidget {
     return _normalize(data['rol']) == role.toLowerCase();
   }
 
-  String get _sedeLabel =>
-      _resolvedSedeId == SedeAccess.matrizId
-          ? 'Sede Matriz'
-          : SedeAccess.displayNameForId(_resolvedSedeId);
+  String get _sedeLabel => _resolvedSedeId == SedeAccess.matrizId
+      ? 'Sede Matriz'
+      : SedeAccess.displayNameForId(_resolvedSedeId);
   Color get _bannerColor => _branding.primary;
   Color get _bannerSoftColor => _branding.surface;
-  Color get _panelBorderColor => _branding.primary.withOpacity(0.24);
-  Color get _panelShadowColor => _branding.primary.withOpacity(0.10);
+  Color get _panelBorderColor => _branding.primary.withValues(alpha: 0.24);
+  Color get _panelShadowColor => _branding.primary.withValues(alpha: 0.10);
 
   Set<String> _allowedNames(List<QueryDocumentSnapshot> docs) {
     return docs
         .map((doc) => doc.data() as Map<String, dynamic>)
         .where((data) {
           final isValidRole =
-              _matchesRole(data, 'Docente') || _matchesRole(data, 'Administrativo');
+              _matchesRole(data, 'Docente') ||
+              _matchesRole(data, 'Administrativo');
           return _matchesCurrentSede(data) && isValidRole;
         })
         .map((data) => (data['nombre'] ?? '').toString().trim())
@@ -99,16 +100,15 @@ class EstadisticasAdminWeb extends StatelessWidget {
               );
             }
 
-            final allowedNames = _allowedNames(usuariosSnapshot.data?.docs ?? const []);
+            final allowedNames = _allowedNames(
+              usuariosSnapshot.data?.docs ?? const [],
+            );
             final filtrados = _filterAsistencias(
               asistencias,
               allowedNames: allowedNames,
             );
 
-            return _buildContenido(
-              filtrados,
-              showSedeBanner: true,
-            );
+            return _buildContenido(filtrados, showSedeBanner: true);
           },
         );
       },
@@ -123,34 +123,24 @@ class EstadisticasAdminWeb extends StatelessWidget {
       padding: const EdgeInsets.all(15),
       child: Column(
         children: [
+          BootstrapAdminHero(
+            branding: _branding,
+            icon: Icons.analytics_rounded,
+            eyebrow: _sedeLabel,
+            title: 'Indicadores y estadisticas',
+            subtitle:
+                'Analiza asistencia, comportamiento y tendencias del personal de $_sedeLabel desde una vista mas clara y consistente.',
+          ),
+          const SizedBox(height: 18),
           if (showSedeBanner)
-            Container(
-              width: double.infinity,
-              margin: const EdgeInsets.only(bottom: 16),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(
-                color: _bannerSoftColor,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: _bannerColor.withOpacity(0.24)),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.people_alt_outlined,
-                    color: _bannerColor,
-                    size: 18,
-                  ),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Mostrando solo asistencias y alertas del personal de $_sedeLabel.',
-                      style: TextStyle(
-                        color: _bannerColor,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ],
+            Padding(
+              padding: const EdgeInsets.only(bottom: 18),
+              child: BootstrapAdminAlertBar(
+                icon: Icons.people_alt_outlined,
+                message:
+                    'Mostrando solo asistencias y alertas del personal de $_sedeLabel.',
+                accentColor: _bannerColor,
+                backgroundColor: _bannerSoftColor,
               ),
             ),
           Container(
@@ -235,8 +225,14 @@ class EstadisticasAdminWeb extends StatelessWidget {
                         fontSize: 17,
                         fontWeight: FontWeight.bold,
                       ),
-                      leftChevronIcon: Icon(Icons.chevron_left, color: Colors.white),
-                      rightChevronIcon: Icon(Icons.chevron_right, color: Colors.white),
+                      leftChevronIcon: Icon(
+                        Icons.chevron_left,
+                        color: Colors.white,
+                      ),
+                      rightChevronIcon: Icon(
+                        Icons.chevron_right,
+                        color: Colors.white,
+                      ),
                     ),
                     calendarStyle: const CalendarStyle(
                       todayDecoration: BoxDecoration(
@@ -250,10 +246,7 @@ class EstadisticasAdminWeb extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 20),
-              Expanded(
-                flex: 1,
-                child: _buildAtrasosPanel(docs),
-              ),
+              Expanded(flex: 1, child: _buildAtrasosPanel(docs)),
             ],
           ),
         ],
@@ -280,7 +273,7 @@ class EstadisticasAdminWeb extends StatelessWidget {
             barWidth: 4,
             belowBarData: BarAreaData(
               show: true,
-              color: const Color(0xFF00C0EF).withOpacity(0.3),
+              color: const Color(0xFF00C0EF).withValues(alpha: 0.3),
             ),
           ),
         ],
@@ -337,37 +330,93 @@ class EstadisticasAdminWeb extends StatelessWidget {
   }
 
   Widget _atrasoItem(String nombre, String estado, String hora) {
-    return ListTile(
-      leading: const CircleAvatar(
-        backgroundColor: Colors.redAccent,
-        child: Icon(Icons.warning, color: Colors.white, size: 15),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.red.shade50,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.redAccent.withValues(alpha: 0.18)),
       ),
-      title: Text(
-        nombre,
-        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-      ),
-      subtitle: Text('Estado: $estado'),
-      trailing: Text(
-        hora,
-        style: const TextStyle(color: Colors.grey, fontSize: 12),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: Colors.redAccent.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              Icons.timer_off_outlined,
+              color: Colors.redAccent,
+              size: 18,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  nombre,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF1E2937),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Estado: $estado',
+                  style: TextStyle(
+                    color: Colors.grey.shade600,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.redAccent.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              hora,
+              style: const TextStyle(
+                color: Colors.redAccent,
+                fontWeight: FontWeight.w800,
+                fontSize: 12,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildSmallButton(String text, bool active) {
-    return Container(
-      margin: const EdgeInsets.only(left: 5),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      margin: const EdgeInsets.only(left: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: active ? Colors.white24 : Colors.transparent,
-        borderRadius: BorderRadius.circular(3),
+        color: active ? Colors.white.withValues(alpha: 0.22) : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: Colors.white.withOpacity(active ? 0.30 : 0.18),
+          color: Colors.white.withValues(alpha: active ? 0.40 : 0.18),
         ),
       ),
       child: Text(
         text,
-        style: const TextStyle(color: Colors.white, fontSize: 11),
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: active ? 1.0 : 0.70),
+          fontSize: 11,
+          fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+        ),
       ),
     );
   }

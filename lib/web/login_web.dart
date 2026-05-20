@@ -74,7 +74,7 @@ class _LoginWebState extends State<LoginWeb> {
   Future<void> _iniciarSesionWeb() async {
     if (!_aceptaTerminos) {
       _mostrarError(
-        'Debe aceptar los terminos y la politica de datos antes de iniciar sesion.',
+        'Debe aceptar los terminos y la politica de datos antes de iniciar sesión.',
       );
       return;
     }
@@ -89,7 +89,7 @@ class _LoginWebState extends State<LoginWeb> {
     setState(() => _cargando = false);
 
     if (datosUsuario == null) {
-      _mostrarError('Correo o contrasena incorrectos.');
+      _mostrarError('Correo o contraseña incorrectos.');
       return;
     }
 
@@ -129,6 +129,7 @@ class _LoginWebState extends State<LoginWeb> {
           nombreDocente: nombre,
           horariosDocente: listaHorarios,
           correoUsuario: correo,
+          rolUsuario: datosUsuario['rol']?.toString(),
           sedeId: sedeId,
         ),
       ),
@@ -151,7 +152,7 @@ class _LoginWebState extends State<LoginWeb> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: const Text(
-          'Contrasena actualizada correctamente. Ya puedes iniciar sesion con la nueva clave.',
+          'Contraseña actualizada correctamente. Ya puedes iniciar sesión con la nueva clave.',
         ),
         backgroundColor: _branding.primary,
       ),
@@ -213,7 +214,7 @@ class _LoginWebState extends State<LoginWeb> {
           Positioned.fill(
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: _branding.surface.withOpacity(0.60),
+                color: _branding.surface.withValues(alpha: 0.60),
               ),
             ),
           ),
@@ -228,11 +229,11 @@ class _LoginWebState extends State<LoginWeb> {
                   height: 44,
                   padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.92),
+                    color: Colors.white.withValues(alpha: 0.92),
                     borderRadius: BorderRadius.circular(14),
                     boxShadow: [
                       BoxShadow(
-                        color: _branding.primary.withOpacity(0.10),
+                        color: _branding.primary.withValues(alpha: 0.10),
                         blurRadius: 16,
                         offset: const Offset(0, 8),
                       ),
@@ -259,7 +260,7 @@ class _LoginWebState extends State<LoginWeb> {
                       ),
                     ),
                     Text(
-                      'Tecnologico Sudamericano',
+                      'Tecnológico Sudamericano',
                       style: TextStyle(
                         color: _branding.primaryDark,
                         fontSize: 12,
@@ -269,7 +270,7 @@ class _LoginWebState extends State<LoginWeb> {
                     Text(
                       'Quito',
                       style: TextStyle(
-                        color: Colors.black.withOpacity(0.52),
+                        color: Colors.black.withValues(alpha: 0.52),
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
                       ),
@@ -277,7 +278,7 @@ class _LoginWebState extends State<LoginWeb> {
                     Text(
                       'Yo soy del INTESUD',
                       style: TextStyle(
-                        color: Colors.black.withOpacity(0.42),
+                        color: Colors.black.withValues(alpha: 0.42),
                         fontSize: 11,
                         fontWeight: FontWeight.w500,
                       ),
@@ -293,7 +294,7 @@ class _LoginWebState extends State<LoginWeb> {
             child: Text(
               'Sistema institucional de asistencia',
               style: TextStyle(
-                color: Colors.black.withOpacity(0.35),
+                color: Colors.black.withValues(alpha: 0.35),
                 fontSize: 11,
                 fontWeight: FontWeight.w500,
               ),
@@ -324,14 +325,14 @@ class _LoginWebState extends State<LoginWeb> {
                 child: Container(
                   padding: const EdgeInsets.all(30),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.97),
+                    color: Colors.white.withValues(alpha: 0.97),
                     borderRadius: BorderRadius.circular(28),
                     border: Border.all(
-                      color: _branding.primary.withOpacity(0.10),
+                      color: _branding.primary.withValues(alpha: 0.10),
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: _branding.primary.withOpacity(0.12),
+                        color: _branding.primary.withValues(alpha: 0.12),
                         blurRadius: 36,
                         offset: const Offset(0, 20),
                       ),
@@ -344,7 +345,7 @@ class _LoginWebState extends State<LoginWeb> {
                       Container(
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
-                          color: _branding.surface.withOpacity(0.96),
+                          color: _branding.surface.withValues(alpha: 0.96),
                           borderRadius: BorderRadius.circular(22),
                         ),
                         child: Column(
@@ -352,43 +353,62 @@ class _LoginWebState extends State<LoginWeb> {
                           children: [
                             Container(
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 5,
+                                horizontal: 12,
+                                vertical: 6,
                               ),
                               decoration: BoxDecoration(
-                                color: _branding.primary.withOpacity(0.10),
+                                color: _branding.primary.withValues(alpha: 0.10),
                                 borderRadius: BorderRadius.circular(999),
-                              ),
-                              child: Text(
-                                'Portal institucional',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: _branding.primaryDark,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
+                                border: Border.all(
+                                  color: _branding.primary.withValues(alpha: 0.18),
                                 ),
                               ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    width: 7,
+                                    height: 7,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: _branding.primary,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 7),
+                                  Text(
+                                    'Portal institucional',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: _branding.primaryDark,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 0.3,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                            const SizedBox(height: 12),
+                            const SizedBox(height: 14),
                             Text(
-                              'Iniciar sesion',
+                              'Iniciar sesión',
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 color: _branding.primaryDark,
                                 fontSize: 28,
                                 fontWeight: FontWeight.w800,
                                 height: 1.05,
+                                letterSpacing: -0.5,
                               ),
                             ),
-                            const SizedBox(height: 6),
+                            const SizedBox(height: 8),
                             Text(
                               'Accede con tu cuenta autorizada como Admin, RRHH, docente o personal administrativo.',
                               textAlign: TextAlign.center,
                               style: TextStyle(
-                                color: Colors.black.withOpacity(0.55),
+                                color: Colors.black.withValues(alpha: 0.55),
                                 fontSize: 13,
                                 fontWeight: FontWeight.w500,
-                                height: 1.45,
+                                height: 1.5,
                               ),
                             ),
                           ],
@@ -412,7 +432,7 @@ class _LoginWebState extends State<LoginWeb> {
                       ),
                       const SizedBox(height: 18),
                       const Text(
-                        'Contrasena',
+                        'Contraseña',
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
@@ -424,7 +444,7 @@ class _LoginWebState extends State<LoginWeb> {
                         controller: _passController,
                         obscureText: !_mostrarPassword,
                         decoration: _inputDecoration(
-                          hintText: 'Ingresa tu contrasena',
+                          hintText: 'Ingresa tu contraseña',
                           suffixIcon: IconButton(
                             onPressed: () {
                               setState(() {
@@ -435,7 +455,7 @@ class _LoginWebState extends State<LoginWeb> {
                               _mostrarPassword
                                   ? Icons.visibility_outlined
                                   : Icons.visibility_off_outlined,
-                              color: Colors.black.withOpacity(0.35),
+                              color: Colors.black.withValues(alpha: 0.35),
                               size: 20,
                             ),
                           ),
@@ -480,7 +500,7 @@ class _LoginWebState extends State<LoginWeb> {
                           TextButton(
                             onPressed: _abrirRecuperacionContrasena,
                             child: Text(
-                              'Olvide mi contrasena',
+                              'Olvide mi contraseña',
                               style: TextStyle(
                                 color: _branding.primary,
                                 fontSize: 12,
@@ -493,27 +513,59 @@ class _LoginWebState extends State<LoginWeb> {
                       const SizedBox(height: 14),
                       SizedBox(
                         width: double.infinity,
-                        height: 52,
+                        height: 54,
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
                             elevation: 0,
                             backgroundColor: _branding.primary,
+                            shadowColor: _branding.primary.withValues(alpha: 0.35),
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
+                              borderRadius: BorderRadius.circular(16),
                             ),
                           ),
                           onPressed: _cargando ? null : _iniciarSesionWeb,
                           child: _cargando
-                              ? const CircularProgressIndicator(
-                                  color: Colors.white,
+                              ? Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        color: Colors.white,
+                                        strokeWidth: 2.2,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    const Text(
+                                      'Iniciando sesión...',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
                                 )
-                              : const Text(
-                                  'Iniciar sesion',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w700,
-                                  ),
+                              : Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const Text(
+                                      'Iniciar sesión',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w700,
+                                        letterSpacing: 0.2,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    const Icon(
+                                      Icons.arrow_forward_rounded,
+                                      color: Colors.white,
+                                      size: 18,
+                                    ),
+                                  ],
                                 ),
                         ),
                       ),
@@ -534,22 +586,31 @@ class _LoginWebState extends State<LoginWeb> {
   }) {
     return InputDecoration(
       hintText: hintText,
+      hintStyle: TextStyle(
+        color: Colors.black.withValues(alpha: 0.35),
+        fontWeight: FontWeight.w500,
+        fontSize: 14,
+      ),
       suffixIcon: suffixIcon,
       filled: true,
-      fillColor: _branding.surface.withOpacity(0.70),
+      fillColor: _branding.surface.withValues(alpha: 0.70),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: _branding.primary.withOpacity(0.10)),
+        borderSide: BorderSide(
+          color: _branding.primary.withValues(alpha: 0.10),
+        ),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: _branding.primary.withOpacity(0.10)),
+        borderSide: BorderSide(
+          color: _branding.primary.withValues(alpha: 0.12),
+        ),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: _branding.primary, width: 1.5),
+        borderSide: BorderSide(color: _branding.primary, width: 1.8),
       ),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
     );
   }
 
@@ -562,7 +623,7 @@ class _LoginWebState extends State<LoginWeb> {
         child: Text(
           label,
           style: TextStyle(
-            color: Colors.black.withOpacity(0.42),
+            color: Colors.black.withValues(alpha: 0.42),
             fontSize: 11,
             fontWeight: FontWeight.w500,
           ),

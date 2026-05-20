@@ -1,8 +1,5 @@
 class AppConfig {
-  const AppConfig({
-    required this.appName,
-    required this.defaultSedeId,
-  });
+  const AppConfig({required this.appName, required this.defaultSedeId});
 
   final String appName;
   final String defaultSedeId;
@@ -58,8 +55,7 @@ class AppConfig {
       return AppConfig.sedeCentro;
     }
 
-    if (normalized.endsWith('.creser') ||
-        normalized.endsWith('.cre_ser')) {
+    if (normalized.endsWith('.creser') || normalized.endsWith('.cre_ser')) {
       return AppConfig.sedeCreSer;
     }
 
@@ -147,6 +143,58 @@ class SedeAccess {
   }
 }
 
+class SedeGeoConfig {
+  const SedeGeoConfig({
+    required this.latitude,
+    required this.longitude,
+    this.radiusMeters = 40,
+  });
+
+  final double latitude;
+  final double longitude;
+  final double radiusMeters;
+
+  static const SedeGeoConfig matriz = SedeGeoConfig(
+    latitude: -0.1843090,
+    longitude: -78.4909804,
+    radiusMeters: 40,
+  );
+
+  // Reemplaza estas coordenadas por las reales de la sede norte.
+  static const SedeGeoConfig sedeNorte = SedeGeoConfig(
+    latitude: -0.1581461,
+    longitude: -78.4782213,
+    radiusMeters: 40,
+  );
+
+  // Reemplaza estas coordenadas por las reales de la sede centro.
+  static const SedeGeoConfig sedeCentro = SedeGeoConfig(
+    latitude: -0.2222739,
+    longitude: -78.5121693,
+    radiusMeters: 40,
+  );
+
+  // Reemplaza estas coordenadas por las reales de Cre Ser.
+  static const SedeGeoConfig sedeCreSer = SedeGeoConfig(
+    latitude: -0.1843090,
+    longitude: -78.4909804,
+    radiusMeters: 40,
+  );
+
+  static SedeGeoConfig fromSedeId(String? sedeId) {
+    switch (SedeAccess.normalize(sedeId)) {
+      case SedeAccess.sedeNorteId:
+        return sedeNorte;
+      case SedeAccess.sedeCentroId:
+        return sedeCentro;
+      case SedeAccess.sedeCreSerId:
+        return sedeCreSer;
+      default:
+        return matriz;
+    }
+  }
+}
+
 class UserRoleAccess {
   static const String roleTeacher = 'Docente';
   static const String roleAdministrative = 'Personal administrativo';
@@ -159,7 +207,10 @@ class UserRoleAccess {
   }
 
   static bool isTeacherRole(dynamic value) {
-    return normalizeRole(value) == 'docente';
+    final normalized = normalizeRole(value);
+    return normalized == 'docente' ||
+        normalized == 'personal academico' ||
+        normalized == 'personal academica';
   }
 
   static bool isAdministrativeRole(dynamic value) {
@@ -233,7 +284,7 @@ class UserRoleAccess {
 }
 
 class MatrizApprovalFlow {
-  static const String primaryReviewerEmail = 'nathashamachado07@gmail.com';
+  static const String primaryReviewerEmail = 'recursoshumanos@intesud.edu.ec';
   static const Set<String> finalReviewerEmails = {
     'oscar@sudamericano.edu.ec',
     'yadira@sudamericano.edu.ec',

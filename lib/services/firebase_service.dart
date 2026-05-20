@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_core/firebase_core.dart' show Firebase;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
@@ -14,8 +14,15 @@ class FirebaseService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final PasswordSecurityService _passwordSecurity = PasswordSecurityService();
   static const String _functionsRegion = 'us-central1';
+  static const String _localPreviewCertificateField =
+      'certificadoDigitalP12LocalPreview';
   static const int _passwordRecoveryExpirationMinutes = 10;
   static const int _passwordRecoveryMaxAttempts = 5;
+  static const String _gpsTemporalDesactivadoHastaField =
+      'gpsTemporalDesactivadoHasta';
+  static const int _firmaPerfilMaxBytes = 180 * 1024;
+  static const int _certificadoDigitalMaxBytes = 512 * 1024;
+  static const int _pdfFinalFirestoreMaxBytes = 850 * 1024;
 
   // --- COORDENADAS DEL INSTITUTO ---
   static const double latitudInstituto = -0.1843090;
@@ -46,7 +53,113 @@ class FirebaseService {
     return correo.trim().toLowerCase();
   }
 
+  DateTime _proximaMedianocheLocal([DateTime? base]) {
+    final ahora = (base ?? DateTime.now()).toLocal();
+    return DateTime(ahora.year, ahora.month, ahora.day + 1);
+  }
+
+  DateTime? _toLocalDateTime(dynamic value) {
+    if (value == null) {
+      return null;
+    }
+    if (value is Timestamp) {
+      return value.toDate().toLocal();
+    }
+    if (value is DateTime) {
+      return value.isUtc ? value.toLocal() : value;
+    }
+    if (value is int) {
+      return DateTime.fromMillisecondsSinceEpoch(value).toLocal();
+    }
+    if (value is String) {
+      final parsed = DateTime.tryParse(value);
+      if (parsed != null) {
+        return parsed.isUtc ? parsed.toLocal() : parsed;
+      }
+    }
+    return null;
+  }
+
+  DateTime? _gpsTemporalDesactivadoHastaActivo(
+    Map<String, dynamic>? data, {
+    required String gpsField,
+  }) {
+    if (data == null || data[gpsField] != false) {
+      return null;
+    }
+
+    final desactivadoHasta = _toLocalDateTime(
+      data[_gpsTemporalDesactivadoHastaField],
+    );
+    if (desactivadoHasta == null) {
+      return null;
+    }
+
+    final ahora = DateTime.now().toLocal();
+    return ahora.isBefore(desactivadoHasta) ? desactivadoHasta : null;
+  }
+
+  Map<String, dynamic> _buildGpsTemporalPayload({
+    required bool requiereGeolocalizacion,
+    required String gpsField,
+  }) {
+    return {
+      gpsField: requiereGeolocalizacion,
+      _gpsTemporalDesactivadoHastaField: requiereGeolocalizacion
+          ? FieldValue.delete()
+          : Timestamp.fromDate(_proximaMedianocheLocal()),
+    };
+  }
+
+  bool _requiereGeolocalizacionEfectiva(
+    Map<String, dynamic>? data, {
+    required String gpsField,
+  }) {
+    if (data == null || data[gpsField] != false) {
+      return true;
+    }
+
+    if (_gpsTemporalDesactivadoHastaActivo(data, gpsField: gpsField) != null) {
+      return false;
+    }
+
+    return _toLocalDateTime(data[_gpsTemporalDesactivadoHastaField]) != null;
+  }
+
+  bool requiereGeolocalizacionUsuarioEfectiva(Map<String, dynamic>? userData) {
+    return _requiereGeolocalizacionEfectiva(
+      userData,
+      gpsField: 'requiereGeolocalizacion',
+    );
+  }
+
+  bool requiereGeolocalizacionAreaEfectiva(Map<String, dynamic>? areaData) {
+    return _requiereGeolocalizacionEfectiva(
+      areaData,
+      gpsField: 'requiereGeolocalizacionPorDefecto',
+    );
+  }
+
+  DateTime? obtenerGpsTemporalDesactivadoHastaUsuario(
+    Map<String, dynamic>? userData,
+  ) {
+    return _gpsTemporalDesactivadoHastaActivo(
+      userData,
+      gpsField: 'requiereGeolocalizacion',
+    );
+  }
+
+  DateTime? obtenerGpsTemporalDesactivadoHastaArea(
+    Map<String, dynamic>? areaData,
+  ) {
+    return _gpsTemporalDesactivadoHastaActivo(
+      areaData,
+      gpsField: 'requiereGeolocalizacionPorDefecto',
+    );
+  }
+
   Map<String, dynamic> _sanitizarDatosUsuario(Map<String, dynamic> data) {
+    final certificado = _extraerCertificadoDigitalP12(data);
     final limpio = Map<String, dynamic>.from(data);
     limpio.remove('password');
     limpio.remove('passwordHash');
@@ -54,6 +167,14 @@ class FirebaseService {
     limpio.remove('passwordAlgorithm');
     limpio.remove('passwordVersion');
     limpio.remove('passwordIterations');
+    limpio.remove(_localPreviewCertificateField);
+    if (certificado != null) {
+      limpio['certificadoDigitalP12'] = _sanitizarCertificadoDigitalP12(
+        certificado,
+      );
+    } else {
+      limpio.remove('certificadoDigitalP12');
+    }
     return limpio;
   }
 
@@ -80,9 +201,7 @@ class FirebaseService {
     if (kIsWeb) {
       final host = Uri.base.host.toLowerCase();
       final isLocalHost =
-          host == 'localhost' ||
-          host == '127.0.0.1' ||
-          host == '0.0.0.0';
+          host == 'localhost' || host == '127.0.0.1' || host == '0.0.0.0';
 
       // In Firebase Hosting we prefer same-origin rewrites to avoid
       // browser CORS/preflight failures when calling secure functions.
@@ -98,6 +217,13 @@ class FirebaseService {
   }
 
   Future<Map<String, dynamic>> _callSecurePasswordFunction(
+    String functionName, {
+    required Map<String, dynamic> payload,
+  }) async {
+    return _callSecureFunction(functionName, payload: payload);
+  }
+
+  Future<Map<String, dynamic>> _callSecureFunction(
     String functionName, {
     required Map<String, dynamic> payload,
   }) async {
@@ -139,7 +265,7 @@ class FirebaseService {
       throw Exception(message);
     }
 
-    throw Exception('No se pudo completar la operacion segura de contrasena.');
+    throw Exception('No se pudo completar la operacion segura solicitada.');
   }
 
   bool _canUseLocalPasswordRecoveryFallback() {
@@ -153,6 +279,29 @@ class FirebaseService {
 
     final host = Uri.base.host.toLowerCase();
     return host == 'localhost' || host == '127.0.0.1' || host == '0.0.0.0';
+  }
+
+  bool _isLocalHostWeb() {
+    if (!kIsWeb) {
+      return false;
+    }
+
+    final host = Uri.base.host.toLowerCase();
+    return host == 'localhost' || host == '127.0.0.1' || host == '0.0.0.0';
+  }
+
+  bool _canUseLocalDigitalCertificateFallback() {
+    return _isLocalHostWeb();
+  }
+
+  bool _shouldUseLocalDigitalCertificateFallback(Object error) {
+    if (!_canUseLocalDigitalCertificateFallback()) {
+      return false;
+    }
+
+    final message = error.toString().toLowerCase();
+    return message.contains('no se pudo conectar con el servicio seguro') ||
+        message.contains('no se pudo completar la operacion segura solicitada');
   }
 
   String _generateRecoveryCode() {
@@ -194,7 +343,9 @@ class FirebaseService {
       (data['passwordRecovery'] as Map<String, dynamic>?) ?? const {},
     );
     final requestedAt = recoveryData['requestedAt'];
-    final requestedDate = requestedAt is Timestamp ? requestedAt.toDate() : null;
+    final requestedDate = requestedAt is Timestamp
+        ? requestedAt.toDate()
+        : null;
 
     if (requestedDate != null) {
       final elapsedSeconds = DateTime.now().difference(requestedDate).inSeconds;
@@ -255,8 +406,9 @@ class FirebaseService {
     final codeHash = (recoveryData['codeHash'] ?? '').toString();
     final codeSalt = (recoveryData['codeSalt'] ?? '').toString();
     final expiresAtValue = recoveryData['expiresAt'];
-    final expiresAt =
-        expiresAtValue is Timestamp ? expiresAtValue.toDate() : null;
+    final expiresAt = expiresAtValue is Timestamp
+        ? expiresAtValue.toDate()
+        : null;
     final attempts = (recoveryData['attempts'] as num?)?.toInt() ?? 0;
     final maxAttempts =
         (recoveryData['maxAttempts'] as num?)?.toInt() ??
@@ -563,11 +715,45 @@ class FirebaseService {
     );
   }
 
+  static const int _registroMarcacionToleranciaMinutos = 10;
+  static const int _horarioEspecialToleranciaSalidaAntesDefault = 10;
+  static const int _horarioEspecialToleranciaSalidaDespuesDefault = 10;
+
   int _horaEnMinutos(String hora) {
     final partes = hora.split(':');
     final horas = int.tryParse(partes[0]) ?? 0;
     final minutos = partes.length > 1 ? int.tryParse(partes[1]) ?? 0 : 0;
     return (horas * 60) + minutos;
+  }
+
+  String _minutosAHora(int totalMinutos) {
+    final minutosNormalizados = totalMinutos.clamp(0, (23 * 60) + 59);
+    final horas = minutosNormalizados ~/ 60;
+    final minutos = minutosNormalizados % 60;
+    return '${horas.toString().padLeft(2, '0')}:${minutos.toString().padLeft(2, '0')}';
+  }
+
+  ({int inicio, int fin}) _ventanaMarcacionDesdeReferencia(int referenciaMin) {
+    final inicio = (referenciaMin - _registroMarcacionToleranciaMinutos).clamp(
+      0,
+      (23 * 60) + 59,
+    );
+    final fin = (referenciaMin + _registroMarcacionToleranciaMinutos).clamp(
+      0,
+      (23 * 60) + 59,
+    );
+    return (inicio: inicio, fin: fin);
+  }
+
+  String _etiquetaVentanaMarcacion(int inicioMin, int finMin) {
+    return '${_minutosAHora(inicioMin)} a ${_minutosAHora(finMin)}';
+  }
+
+  int _resolverToleranciaHorarioEspecial(dynamic value, int fallback) {
+    if (value is int && value >= 0) {
+      return value;
+    }
+    return fallback;
   }
 
   Future<Map<String, dynamic>?> _obtenerUsuarioPorCorreo(String correo) async {
@@ -591,6 +777,1075 @@ class FirebaseService {
 
   Future<Map<String, dynamic>?> obtenerUsuarioPorCorreo(String correo) async {
     return _obtenerUsuarioPorCorreo(correo);
+  }
+
+  Map<String, dynamic>? _extraerFirmaPerfil(Map<String, dynamic>? userData) {
+    final firma = userData?['firmaPerfil'];
+    if (firma is! Map) {
+      return null;
+    }
+
+    return firma.map((key, value) => MapEntry(key.toString(), value));
+  }
+
+  Map<String, dynamic>? _extraerCertificadoDigitalP12(
+    Map<String, dynamic>? userData,
+  ) {
+    final certificado = userData?['certificadoDigitalP12'];
+    if (certificado is Map) {
+      return certificado.map((key, value) => MapEntry(key.toString(), value));
+    }
+
+    if (_canUseLocalDigitalCertificateFallback()) {
+      final localPreview = userData?[_localPreviewCertificateField];
+      if (localPreview is Map) {
+        return localPreview.map(
+          (key, value) => MapEntry(key.toString(), value),
+        );
+      }
+    }
+
+    return null;
+  }
+
+  Map<String, dynamic>? extraerDocumentoPdfFinalSolicitud(
+    Map<String, dynamic>? solicitudData,
+  ) {
+    if (solicitudData == null) {
+      return null;
+    }
+
+    if (solicitudData.containsKey('blob') ||
+        solicitudData.containsKey('base64') ||
+        solicitudData.containsKey('mimeType')) {
+      return Map<String, dynamic>.from(solicitudData);
+    }
+
+    final documento = solicitudData['documentoPdfFinal'];
+    if (documento is! Map) {
+      return null;
+    }
+
+    return documento.map((key, value) => MapEntry(key.toString(), value));
+  }
+
+  Uint8List? extraerBytesDocumentoPdfFinalSolicitud(
+    Map<String, dynamic>? solicitudData,
+  ) {
+    final documento = extraerDocumentoPdfFinalSolicitud(solicitudData);
+    if (documento == null) {
+      return null;
+    }
+
+    final blob = documento['blob'];
+    if (blob is Blob) {
+      return blob.bytes;
+    }
+    if (blob is Uint8List) {
+      return blob;
+    }
+    if (blob is List<int>) {
+      return Uint8List.fromList(blob);
+    }
+
+    final base64Value = (documento['base64'] ?? '').toString().trim();
+    if (base64Value.isEmpty) {
+      return null;
+    }
+
+    try {
+      return base64Decode(base64Value);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> obtenerDocumentoPdfFinalSolicitud(
+    String idDoc,
+  ) async {
+    final snapshot = await _db
+        .collection('solicitudes')
+        .doc(idDoc)
+        .collection('documentos')
+        .doc('pdf_final')
+        .get();
+
+    if (snapshot.exists) {
+      return snapshot.data();
+    }
+
+    return null;
+  }
+
+  Future<Uint8List?> obtenerBytesDocumentoPdfFinalSolicitud(String idDoc) async {
+    final documento = await obtenerDocumentoPdfFinalSolicitud(idDoc);
+    return extraerBytesDocumentoPdfFinalSolicitud(documento);
+  }
+
+  Map<String, dynamic> _sanitizarCertificadoDigitalP12(
+    Map<String, dynamic> certificado,
+  ) {
+    final limpio = Map<String, dynamic>.from(certificado);
+    for (final key in const [
+      'encryptedBase64',
+      'encryptionSalt',
+      'encryptionIv',
+      'encryptionAuthTag',
+      'passwordHash',
+      'passwordSalt',
+      'passwordAlgorithm',
+      'passwordVersion',
+      'passwordIterations',
+    ]) {
+      limpio.remove(key);
+    }
+    return limpio;
+  }
+
+  bool _firmaPerfilTieneImagen(Map<String, dynamic>? firmaPerfil) {
+    if (firmaPerfil == null) {
+      return false;
+    }
+
+    final estado = (firmaPerfil['estado'] ?? 'activa').toString().trim();
+    final imageBase64 = (firmaPerfil['imageBase64'] ?? '').toString().trim();
+    return estado.toLowerCase() != 'inactiva' && imageBase64.isNotEmpty;
+  }
+
+  bool _firmaPerfilTieneClaveFirma(Map<String, dynamic>? firmaPerfil) {
+    if (firmaPerfil == null) {
+      return false;
+    }
+
+    final hash = (firmaPerfil['claveFirmaHash'] ?? '').toString().trim();
+    final salt = (firmaPerfil['claveFirmaSalt'] ?? '').toString().trim();
+    return hash.isNotEmpty && salt.isNotEmpty;
+  }
+
+  bool _certificadoDigitalConfigurado(
+    Map<String, dynamic>? certificadoDigitalP12,
+  ) {
+    if (certificadoDigitalP12 == null) {
+      return false;
+    }
+
+    final estado = (certificadoDigitalP12['estado'] ?? 'activo')
+        .toString()
+        .trim()
+        .toLowerCase();
+    final encryptedBase64 = (certificadoDigitalP12['encryptedBase64'] ?? '')
+        .toString()
+        .trim();
+    return estado != 'inactivo' && encryptedBase64.isNotEmpty;
+  }
+
+  Future<DocumentSnapshot<Map<String, dynamic>>?> _findUserSnapshotByIdentity({
+    String? userDocId,
+    required String correo,
+    String? sedeId,
+  }) async {
+    final correoNormalizado = _normalizarCorreo(correo);
+    final docId = (userDocId ?? '').trim();
+
+    if (docId.isNotEmpty) {
+      final snapshot = await _db.collection('usuarios').doc(docId).get();
+      if (snapshot.exists) {
+        return snapshot;
+      }
+    }
+
+    if (correoNormalizado.isEmpty) {
+      return null;
+    }
+
+    final query = await _db
+        .collection('usuarios')
+        .where('correo', isEqualTo: correoNormalizado)
+        .get();
+
+    if (query.docs.isEmpty) {
+      return null;
+    }
+
+    final sedeNormalizada = SedeAccess.normalize(sedeId);
+    if (sedeNormalizada.isNotEmpty) {
+      for (final doc in query.docs) {
+        if (SedeAccess.matchesSede(doc.data(), sedeNormalizada)) {
+          return doc;
+        }
+      }
+    }
+
+    return query.docs.first;
+  }
+
+  Future<Map<String, dynamic>?> obtenerFirmaPerfilUsuario({
+    String? userDocId,
+    required String correo,
+    String? sedeId,
+  }) async {
+    final snapshot = await _findUserSnapshotByIdentity(
+      userDocId: userDocId,
+      correo: correo,
+      sedeId: sedeId,
+    );
+    if (snapshot == null || !snapshot.exists) {
+      return null;
+    }
+
+    return _extraerFirmaPerfil(snapshot.data());
+  }
+
+  Future<Map<String, dynamic>?> obtenerCertificadoDigitalUsuario({
+    String? userDocId,
+    required String correo,
+    String? sedeId,
+  }) async {
+    final snapshot = await _findUserSnapshotByIdentity(
+      userDocId: userDocId,
+      correo: correo,
+      sedeId: sedeId,
+    );
+    if (snapshot == null || !snapshot.exists) {
+      return null;
+    }
+
+    final certificado = _extraerCertificadoDigitalP12(snapshot.data());
+    if (certificado == null) {
+      return null;
+    }
+
+    return _sanitizarCertificadoDigitalP12(certificado);
+  }
+
+  Future<Map<String, dynamic>> registrarCertificadoDigitalUsuario({
+    String? userDocId,
+    required String correo,
+    String? sedeId,
+    required String accountPassword,
+    required String certificatePassword,
+    required Uint8List fileBytes,
+    required String fileName,
+    required String mimeType,
+  }) async {
+    final normalizedFileName = fileName.trim();
+    final normalizedMimeType = mimeType.trim().toLowerCase();
+
+    if (accountPassword.trim().isEmpty) {
+      throw Exception(
+        'Ingresa tu clave actual de la cuenta para registrar el certificado.',
+      );
+    }
+
+    if (certificatePassword.trim().isEmpty) {
+      throw Exception('Ingresa la clave del certificado .p12.');
+    }
+
+    if (fileBytes.isEmpty) {
+      throw Exception('Selecciona un archivo .p12 o .pfx valido.');
+    }
+
+    if (fileBytes.lengthInBytes > _certificadoDigitalMaxBytes) {
+      throw Exception(
+        'El certificado supera el tamano permitido. Usa un archivo .p12 o .pfx de hasta 512 KB.',
+      );
+    }
+
+    final lowerName = normalizedFileName.toLowerCase();
+    if (!(lowerName.endsWith('.p12') || lowerName.endsWith('.pfx'))) {
+      throw Exception('El certificado debe estar en formato .p12 o .pfx.');
+    }
+
+    final userDocIdValue = userDocId?.trim() ?? '';
+    final sedeIdValue = sedeId?.trim() ?? '';
+
+    try {
+      final response = await _callSecureFunction(
+        'registerDigitalCertificate',
+        payload: {
+          if (userDocIdValue.isNotEmpty) 'userDocId': userDocIdValue,
+          'correo': _normalizarCorreo(correo),
+          if (sedeIdValue.isNotEmpty) 'sedeId': sedeIdValue,
+          'passwordActual': accountPassword.trim(),
+          'certificatePassword': certificatePassword.trim(),
+          'certificateBase64': base64Encode(fileBytes),
+          'fileName': normalizedFileName,
+          'mimeType': normalizedMimeType.isEmpty
+              ? 'application/x-pkcs12'
+              : normalizedMimeType,
+        },
+      );
+
+      final certificado = response['certificadoDigitalP12'];
+      if (certificado is Map<String, dynamic>) {
+        return certificado;
+      }
+      if (certificado is Map) {
+        return certificado.map((key, value) => MapEntry(key.toString(), value));
+      }
+      return <String, dynamic>{};
+    } catch (error) {
+      if (_shouldUseLocalDigitalCertificateFallback(error)) {
+        return _registrarCertificadoDigitalUsuarioEnLocal(
+          userDocId: userDocId,
+          correo: correo,
+          sedeId: sedeId,
+          accountPassword: accountPassword,
+          certificatePassword: certificatePassword,
+          fileBytes: fileBytes,
+          fileName: normalizedFileName,
+          mimeType: normalizedMimeType.isEmpty
+              ? 'application/x-pkcs12'
+              : normalizedMimeType,
+        );
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> eliminarCertificadoDigitalUsuario({
+    String? userDocId,
+    required String correo,
+    String? sedeId,
+    required String accountPassword,
+  }) async {
+    if (accountPassword.trim().isEmpty) {
+      throw Exception(
+        'Ingresa tu clave actual de la cuenta para eliminar el certificado.',
+      );
+    }
+
+    final userDocIdValue = userDocId?.trim() ?? '';
+    final sedeIdValue = sedeId?.trim() ?? '';
+
+    try {
+      await _callSecureFunction(
+        'deleteDigitalCertificate',
+        payload: {
+          if (userDocIdValue.isNotEmpty) 'userDocId': userDocIdValue,
+          'correo': _normalizarCorreo(correo),
+          if (sedeIdValue.isNotEmpty) 'sedeId': sedeIdValue,
+          'passwordActual': accountPassword.trim(),
+        },
+      );
+    } catch (error) {
+      if (_shouldUseLocalDigitalCertificateFallback(error)) {
+        await _eliminarCertificadoDigitalUsuarioEnLocal(
+          userDocId: userDocId,
+          correo: correo,
+          sedeId: sedeId,
+          accountPassword: accountPassword,
+        );
+        return;
+      }
+      rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>> validarCertificadoDigitalUsuario({
+    String? userDocId,
+    required String correo,
+    String? sedeId,
+    required String certificatePassword,
+  }) async {
+    if (certificatePassword.trim().isEmpty) {
+      throw Exception('Ingresa la clave del certificado .p12.');
+    }
+
+    final userDocIdValue = userDocId?.trim() ?? '';
+    final sedeIdValue = sedeId?.trim() ?? '';
+
+    try {
+      final response = await _callSecureFunction(
+        'verifyDigitalCertificatePassword',
+        payload: {
+          if (userDocIdValue.isNotEmpty) 'userDocId': userDocIdValue,
+          'correo': _normalizarCorreo(correo),
+          if (sedeIdValue.isNotEmpty) 'sedeId': sedeIdValue,
+          'certificatePassword': certificatePassword.trim(),
+        },
+      );
+
+      final certificado = response['certificadoDigitalP12'];
+      if (certificado is Map<String, dynamic>) {
+        return certificado;
+      }
+      if (certificado is Map) {
+        return certificado.map((key, value) => MapEntry(key.toString(), value));
+      }
+      return <String, dynamic>{};
+    } catch (error) {
+      if (_shouldUseLocalDigitalCertificateFallback(error)) {
+        return _validarCertificadoDigitalUsuarioEnLocal(
+          userDocId: userDocId,
+          correo: correo,
+          sedeId: sedeId,
+          certificatePassword: certificatePassword,
+        );
+      }
+      rethrow;
+    }
+  }
+
+  Future<Uint8List> firmarPdfConCertificadoDigital({
+    String? userDocId,
+    required String correo,
+    String? sedeId,
+    required String certificatePassword,
+    required Uint8List pdfBytes,
+    String? reason,
+    String? signerName,
+    String? location,
+    String? contactInfo,
+  }) async {
+    if (pdfBytes.isEmpty) {
+      throw Exception('No se recibio un PDF valido para firmar.');
+    }
+
+    final userDocIdValue = userDocId?.trim() ?? '';
+    final sedeIdValue = sedeId?.trim() ?? '';
+    final reasonValue = reason?.trim() ?? '';
+    final signerNameValue = signerName?.trim() ?? '';
+    final locationValue = location?.trim() ?? '';
+    final contactInfoValue = contactInfo?.trim() ?? '';
+
+    try {
+      final response = await _callSecureFunction(
+        'signPdfWithDigitalCertificate',
+        payload: {
+          if (userDocIdValue.isNotEmpty) 'userDocId': userDocIdValue,
+          'correo': _normalizarCorreo(correo),
+          if (sedeIdValue.isNotEmpty) 'sedeId': sedeIdValue,
+          'certificatePassword': certificatePassword.trim(),
+          'pdfBase64': base64Encode(pdfBytes),
+          if (reasonValue.isNotEmpty) 'reason': reasonValue,
+          if (signerNameValue.isNotEmpty) 'signerName': signerNameValue,
+          if (locationValue.isNotEmpty) 'location': locationValue,
+          if (contactInfoValue.isNotEmpty) 'contactInfo': contactInfoValue,
+        },
+      );
+
+      final signedPdfBase64 = (response['signedPdfBase64'] ?? '')
+          .toString()
+          .trim();
+      if (signedPdfBase64.isEmpty) {
+        throw Exception('La API no devolvio un PDF firmado.');
+      }
+
+      try {
+        return base64Decode(signedPdfBase64);
+      } catch (_) {
+        throw Exception('No se pudo leer el PDF firmado devuelto por la API.');
+      }
+    } catch (error) {
+      if (_shouldUseLocalDigitalCertificateFallback(error)) {
+        return _firmarPdfConCertificadoDigitalEnLocal(
+          userDocId: userDocId,
+          correo: correo,
+          sedeId: sedeId,
+          certificatePassword: certificatePassword,
+          pdfBytes: pdfBytes,
+        );
+      }
+      rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>> _registrarCertificadoDigitalUsuarioEnLocal({
+    String? userDocId,
+    required String correo,
+    String? sedeId,
+    required String accountPassword,
+    required String certificatePassword,
+    required Uint8List fileBytes,
+    required String fileName,
+    required String mimeType,
+  }) async {
+    final snapshot = await _findUserSnapshotByIdentity(
+      userDocId: userDocId,
+      correo: correo,
+      sedeId: sedeId,
+    );
+    if (snapshot == null || !snapshot.exists) {
+      throw Exception('No se encontro el perfil del usuario.');
+    }
+
+    final data = snapshot.data() ?? const <String, dynamic>{};
+    final passwordValida = await _validarPasswordUsuario(
+      userRef: snapshot.reference,
+      data: data,
+      password: accountPassword.trim(),
+    );
+    if (!passwordValida) {
+      throw Exception('La clave actual de la cuenta no es correcta.');
+    }
+
+    final passwordPayload = await _crearPayloadPasswordSeguro(
+      certificatePassword.trim(),
+    );
+    final now = DateTime.now();
+    final fingerprint = base64Url
+        .encode(
+          utf8.encode(
+            '${fileName.trim().toLowerCase()}|${fileBytes.lengthInBytes}|${now.toIso8601String()}',
+          ),
+        )
+        .replaceAll('=', '');
+
+    final certificadoLocal = <String, dynamic>{
+      'estado': 'activo',
+      'provider': 'p12_localhost_preview',
+      'localPreviewOnly': true,
+      'fileName': fileName.trim().isEmpty ? 'certificado_local.p12' : fileName,
+      'mimeType': mimeType.trim().isEmpty
+          ? 'application/x-pkcs12'
+          : mimeType.trim(),
+      'encryptedBase64': base64Encode(fileBytes),
+      ...passwordPayload,
+      'subject': 'Vista previa localhost',
+      'issuer': 'Vista previa localhost',
+      'serialNumber': fingerprint,
+      'fingerprintSha256': fingerprint,
+      'validFrom': Timestamp.fromDate(now),
+      'validTo': Timestamp.fromDate(now.add(const Duration(days: 365))),
+      'actualizadoEn': FieldValue.serverTimestamp(),
+    };
+
+    await snapshot.reference.set({
+      _localPreviewCertificateField: certificadoLocal,
+      'actualizadoEn': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    return _sanitizarCertificadoDigitalP12(certificadoLocal);
+  }
+
+  Future<void> _eliminarCertificadoDigitalUsuarioEnLocal({
+    String? userDocId,
+    required String correo,
+    String? sedeId,
+    required String accountPassword,
+  }) async {
+    final snapshot = await _findUserSnapshotByIdentity(
+      userDocId: userDocId,
+      correo: correo,
+      sedeId: sedeId,
+    );
+    if (snapshot == null || !snapshot.exists) {
+      throw Exception('No se encontro el perfil del usuario.');
+    }
+
+    final data = snapshot.data() ?? const <String, dynamic>{};
+    final passwordValida = await _validarPasswordUsuario(
+      userRef: snapshot.reference,
+      data: data,
+      password: accountPassword.trim(),
+    );
+    if (!passwordValida) {
+      throw Exception('La clave actual de la cuenta no es correcta.');
+    }
+
+    await snapshot.reference.set({
+      _localPreviewCertificateField: FieldValue.delete(),
+      'actualizadoEn': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Future<Map<String, dynamic>> _validarCertificadoDigitalUsuarioEnLocal({
+    String? userDocId,
+    required String correo,
+    String? sedeId,
+    required String certificatePassword,
+  }) async {
+    final snapshot = await _findUserSnapshotByIdentity(
+      userDocId: userDocId,
+      correo: correo,
+      sedeId: sedeId,
+    );
+    if (snapshot == null || !snapshot.exists) {
+      throw Exception('No se encontro el perfil del usuario.');
+    }
+
+    final data = snapshot.data() ?? const <String, dynamic>{};
+    final certificado = _extraerCertificadoDigitalP12(data);
+    if (!_certificadoDigitalConfigurado(certificado)) {
+      throw Exception('No tienes un certificado digital .p12 registrado.');
+    }
+
+    final hash = (certificado?['passwordHash'] ?? '').toString().trim();
+    final salt = (certificado?['passwordSalt'] ?? '').toString().trim();
+    if (hash.isEmpty || salt.isEmpty) {
+      throw Exception(
+        'El certificado de prueba no tiene una clave valida configurada.',
+      );
+    }
+
+    final passwordValida = await _passwordSecurity.verifyPassword(
+      password: certificatePassword.trim(),
+      expectedHash: hash,
+      salt: salt,
+    );
+    if (!passwordValida) {
+      throw Exception('La clave del certificado .p12 no es correcta.');
+    }
+
+    return _sanitizarCertificadoDigitalP12(certificado!);
+  }
+
+  Future<Uint8List> _firmarPdfConCertificadoDigitalEnLocal({
+    String? userDocId,
+    required String correo,
+    String? sedeId,
+    required String certificatePassword,
+    required Uint8List pdfBytes,
+  }) async {
+    await _validarCertificadoDigitalUsuarioEnLocal(
+      userDocId: userDocId,
+      correo: correo,
+      sedeId: sedeId,
+      certificatePassword: certificatePassword,
+    );
+
+    return Uint8List.fromList(pdfBytes);
+  }
+
+  Future<void> guardarPdfFinalSolicitud({
+    required String idDoc,
+    required Uint8List pdfBytes,
+    required String fileName,
+    required String snapshotToken,
+    bool firmadoDigitalmente = false,
+    bool localPreviewOnly = false,
+    String? generatedByEmail,
+    String? generatedByName,
+  }) async {
+    if (pdfBytes.isEmpty) {
+      throw Exception('No se recibio un PDF valido para guardar.');
+    }
+
+    if (pdfBytes.lengthInBytes > _pdfFinalFirestoreMaxBytes) {
+      throw Exception(
+        'El PDF final supera el tamano permitido para guardado interno. Reduce el peso de las firmas o usa una version mas liviana.',
+      );
+    }
+
+    final solicitudRef = _db.collection('solicitudes').doc(idDoc);
+    final documentoRef = solicitudRef.collection('documentos').doc('pdf_final');
+    final now = DateTime.now();
+    final generatedByEmailValue = generatedByEmail?.trim() ?? '';
+    final generatedByNameValue = generatedByName?.trim() ?? '';
+    await documentoRef.set({
+      'estado': 'activo',
+      'mimeType': 'application/pdf',
+      'fileName': fileName.trim().isEmpty ? 'solicitud_firmada.pdf' : fileName,
+      'blob': Blob(pdfBytes),
+      'tamanoBytes': pdfBytes.lengthInBytes,
+      'snapshotToken': snapshotToken.trim(),
+      'firmadoDigitalmente': firmadoDigitalmente,
+      'localPreviewOnly': localPreviewOnly,
+      if (generatedByEmailValue.isNotEmpty)
+        'generatedByEmail': generatedByEmailValue,
+      if (generatedByNameValue.isNotEmpty)
+        'generatedByName': generatedByNameValue,
+      'generadoEn': FieldValue.serverTimestamp(),
+      'generadoEnCliente': Timestamp.fromDate(now),
+    }, SetOptions(merge: true));
+
+    await solicitudRef.set({
+      'pdfFinalDisponible': true,
+      'pdfFinalSnapshotToken': snapshotToken.trim(),
+      'pdfFinalFirmadoDigitalmente': firmadoDigitalmente,
+      'pdfFinalActualizadoEn': FieldValue.serverTimestamp(),
+      'documentoPdfFinal': FieldValue.delete(),
+      'actualizadoEn': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Future<void> guardarFirmaPerfilUsuario({
+    String? userDocId,
+    required String correo,
+    String? sedeId,
+    required String passwordActual,
+    required String signingPassword,
+    required Uint8List fileBytes,
+    required String fileName,
+    required String mimeType,
+  }) async {
+    final password = passwordActual.trim();
+    final signingKey = signingPassword.trim();
+    final normalizedMimeType = mimeType.trim().toLowerCase();
+    final normalizedFileName = fileName.trim();
+
+    if (password.isEmpty) {
+      throw Exception('Ingresa tu clave actual para guardar la firma.');
+    }
+
+    if (signingKey.isEmpty) {
+      throw Exception('Define la clave de firma que usaras al firmar.');
+    }
+
+    if (signingKey.length < 4) {
+      throw Exception(
+        'La clave de firma debe tener al menos 4 caracteres.',
+      );
+    }
+
+    if (fileBytes.isEmpty) {
+      throw Exception('Selecciona un archivo de firma valido.');
+    }
+
+    if (fileBytes.lengthInBytes > _firmaPerfilMaxBytes) {
+      throw Exception(
+        'La firma supera el tamano permitido. Usa una imagen PNG o JPG liviana de hasta 180 KB.',
+      );
+    }
+
+    const allowedMimeTypes = <String>{
+      'image/png',
+      'image/jpeg',
+      'image/jpg',
+      'image/webp',
+    };
+    if (!allowedMimeTypes.contains(normalizedMimeType)) {
+      throw Exception('La firma debe estar en formato PNG, JPG o WEBP.');
+    }
+
+    final snapshot = await _findUserSnapshotByIdentity(
+      userDocId: userDocId,
+      correo: correo,
+      sedeId: sedeId,
+    );
+    if (snapshot == null || !snapshot.exists) {
+      throw Exception('No se encontro el perfil del usuario.');
+    }
+
+    final data = snapshot.data() ?? const <String, dynamic>{};
+    final passwordValida = await _validarPasswordUsuario(
+      userRef: snapshot.reference,
+      data: data,
+      password: password,
+    );
+    if (!passwordValida) {
+      throw Exception('La clave actual no es correcta.');
+    }
+
+    final signingKeyPayload = await _passwordSecurity.hashPassword(signingKey);
+
+    await snapshot.reference.set({
+      'firmaPerfil': {
+        'estado': 'activa',
+        'metodo': 'firma_interna_con_clave',
+        'requiereClaveFirma': true,
+        'fileName': normalizedFileName.isEmpty
+            ? 'firma.png'
+            : normalizedFileName,
+        'mimeType': normalizedMimeType,
+        'imageBase64': base64Encode(fileBytes),
+        'tamanoBytes': fileBytes.lengthInBytes,
+        'claveFirmaHash': signingKeyPayload.hash,
+        'claveFirmaSalt': signingKeyPayload.salt,
+        'claveFirmaAlgorithm': signingKeyPayload.algorithm,
+        'claveFirmaVersion': signingKeyPayload.version,
+        'claveFirmaIterations': signingKeyPayload.iterations,
+        'actualizadoEn': FieldValue.serverTimestamp(),
+      },
+      'actualizadoEn': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Future<void> eliminarFirmaPerfilUsuario({
+    String? userDocId,
+    required String correo,
+    String? sedeId,
+    required String passwordActual,
+  }) async {
+    final password = passwordActual.trim();
+    if (password.isEmpty) {
+      throw Exception('Ingresa tu clave actual para eliminar la firma.');
+    }
+
+    final snapshot = await _findUserSnapshotByIdentity(
+      userDocId: userDocId,
+      correo: correo,
+      sedeId: sedeId,
+    );
+    if (snapshot == null || !snapshot.exists) {
+      throw Exception('No se encontro el perfil del usuario.');
+    }
+
+    final data = snapshot.data() ?? const <String, dynamic>{};
+    final passwordValida = await _validarPasswordUsuario(
+      userRef: snapshot.reference,
+      data: data,
+      password: password,
+    );
+    if (!passwordValida) {
+      throw Exception('La clave actual no es correcta.');
+    }
+
+    await snapshot.reference.set({
+      'firmaPerfil': FieldValue.delete(),
+      'actualizadoEn': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Future<Map<String, dynamic>> autorizarFirmaPerfilUsuario({
+    String? userDocId,
+    required String correo,
+    String? sedeId,
+    required String signingPassword,
+    bool requireDigitalCertificate = false,
+  }) async {
+    final signingKey = signingPassword.trim();
+    if (signingKey.isEmpty) {
+      throw Exception(
+        requireDigitalCertificate
+            ? 'Ingresa la clave del certificado .p12 para continuar.'
+            : 'Ingresa tu clave de firma para continuar.',
+      );
+    }
+
+    final snapshot = await _findUserSnapshotByIdentity(
+      userDocId: userDocId,
+      correo: correo,
+      sedeId: sedeId,
+    );
+    if (snapshot == null || !snapshot.exists) {
+      throw Exception('No se encontro el perfil del usuario.');
+    }
+
+    final data = snapshot.data() ?? const <String, dynamic>{};
+    final firmaPerfil = _extraerFirmaPerfil(data);
+    final certificadoDigitalP12 = _extraerCertificadoDigitalP12(data);
+    if (requireDigitalCertificate) {
+      if (!_certificadoDigitalConfigurado(certificadoDigitalP12)) {
+        throw Exception(
+          'Debes registrar primero tu certificado digital .p12 en tu perfil.',
+        );
+      }
+
+      final certificadoValidado = await validarCertificadoDigitalUsuario(
+        userDocId: snapshot.id,
+        correo: correo,
+        sedeId: sedeId,
+        certificatePassword: signingKey,
+      );
+
+      return {
+        ..._sanitizarDatosUsuario(data),
+        'docId': snapshot.id,
+        '_metodoFirmaAutorizado': 'certificado_digital_p12',
+        'certificadoDigitalP12': certificadoValidado,
+      };
+    }
+
+    if (!_firmaPerfilTieneImagen(firmaPerfil)) {
+      throw Exception(
+        'Debes registrar primero tu archivo de firma en tu perfil.',
+      );
+    }
+
+    final claveValida = await _validarClaveFirmaPerfil(
+      userRef: snapshot.reference,
+      data: data,
+      signingPassword: signingKey,
+    );
+    if (!claveValida) {
+      if (_firmaPerfilTieneClaveFirma(firmaPerfil)) {
+        throw Exception('La clave de firma no es correcta.');
+      }
+      throw Exception(
+        'Tu firma guardada todavia no tiene clave de firma. Actualizala desde tu perfil para continuar.',
+      );
+    }
+
+    return {
+      ..._sanitizarDatosUsuario(data),
+      'docId': snapshot.id,
+    };
+  }
+
+  Future<bool> _validarClaveFirmaPerfil({
+    required DocumentReference<Map<String, dynamic>> userRef,
+    required Map<String, dynamic> data,
+    required String signingPassword,
+  }) async {
+    final firmaPerfil = _extraerFirmaPerfil(data);
+    final hash = (firmaPerfil?['claveFirmaHash'] ?? '').toString().trim();
+    final salt = (firmaPerfil?['claveFirmaSalt'] ?? '').toString().trim();
+
+    if (hash.isNotEmpty && salt.isNotEmpty) {
+      return _passwordSecurity.verifyPassword(
+        password: signingPassword,
+        expectedHash: hash,
+        salt: salt,
+      );
+    }
+
+    return _validarPasswordUsuario(
+      userRef: userRef,
+      data: data,
+      password: signingPassword,
+    );
+  }
+
+  Future<Map<String, dynamic>> _resolverDatosFirmaElectronica({
+    String? correo,
+    String? nombre,
+    Map<String, dynamic>? fallbackUserData,
+    String? sedeIdFallback,
+  }) async {
+    final now = DateTime.now();
+    final fallback = fallbackUserData == null
+        ? null
+        : Map<String, dynamic>.from(fallbackUserData);
+
+    var correoNormalizado = MatrizApprovalFlow.normalizeEmail(
+      correo ?? fallback?['correo'],
+    );
+    Map<String, dynamic>? userData = fallback;
+
+    if ((userData == null || userData.isEmpty) && correoNormalizado.isNotEmpty) {
+      userData = await _obtenerUsuarioPorCorreo(correoNormalizado);
+    }
+
+    correoNormalizado = MatrizApprovalFlow.normalizeEmail(
+      correoNormalizado.isNotEmpty ? correoNormalizado : userData?['correo'],
+    );
+
+    final nombreFallback = (nombre ?? '').trim();
+    final nombreFirmante = userData != null
+        ? UserRoleAccess.displayNameForUser(userData)
+        : (nombreFallback.isNotEmpty
+              ? nombreFallback
+              : (correoNormalizado.isNotEmpty ? correoNormalizado : 'Usuario'));
+
+    final rolFirmante = userData != null
+        ? UserRoleAccess.displayRoleForUser(userData)
+        : '';
+    final cargoFirmante =
+        (userData?['cargo'] ?? userData?['especialidad'] ?? '')
+            .toString()
+            .trim();
+    final cedulaFirmante = (userData?['cedula'] ?? '').toString().trim();
+    final sedeId = userData != null
+        ? SedeAccess.resolveSedeId(userData)
+        : SedeAccess.normalize(sedeIdFallback);
+    final certificadoDigitalP12 = _extraerCertificadoDigitalP12(userData);
+    final metodoAutorizado = (userData?['_metodoFirmaAutorizado'] ?? '')
+        .toString()
+        .trim();
+    final firmaIdBase =
+        '${correoNormalizado.isEmpty ? nombreFirmante : correoNormalizado}|${now.toIso8601String()}';
+    final firmaId = base64Url
+        .encode(utf8.encode(firmaIdBase))
+        .replaceAll('=', '');
+    final metodoFirma = metodoAutorizado.isNotEmpty
+        ? metodoAutorizado
+        : (_certificadoDigitalConfigurado(certificadoDigitalP12)
+              ? 'certificado_digital_p12'
+              : 'firma_interna_con_clave');
+    final fingerprintCertificado =
+        (certificadoDigitalP12?['fingerprintSha256'] ?? '').toString().trim();
+    final serialCertificado =
+        (certificadoDigitalP12?['serialNumber'] ?? '').toString().trim();
+    final qrData = <String>[
+      'INTESUD-FIRMA',
+      firmaId,
+      metodoFirma,
+      if (correoNormalizado.isNotEmpty) correoNormalizado,
+      if (cedulaFirmante.isNotEmpty) cedulaFirmante,
+      if (sedeId.isNotEmpty) sedeId,
+      now.toIso8601String(),
+      if (fingerprintCertificado.isNotEmpty)
+        fingerprintCertificado.substring(
+          0,
+          fingerprintCertificado.length > 24
+              ? 24
+              : fingerprintCertificado.length,
+        ),
+    ].join('|');
+
+    return {
+      'nombre': nombreFirmante,
+      if (correoNormalizado.isNotEmpty) 'correo': correoNormalizado,
+      if (rolFirmante.isNotEmpty) 'rol': rolFirmante,
+      if (cargoFirmante.isNotEmpty) 'cargo': cargoFirmante,
+      if (cedulaFirmante.isNotEmpty) 'cedula': cedulaFirmante,
+      if (sedeId.isNotEmpty) 'sedeId': sedeId,
+      if (sedeId.isNotEmpty) 'sede': SedeAccess.displayNameForId(sedeId),
+      if (fingerprintCertificado.isNotEmpty)
+        'certFingerprint': fingerprintCertificado,
+      if (serialCertificado.isNotEmpty) 'certSerialNumber': serialCertificado,
+      'metodo': metodoFirma,
+      'firmaId': firmaId,
+      'qrData': qrData,
+      'firmadoEnCliente': Timestamp.fromDate(now),
+    };
+  }
+
+  Map<String, dynamic> _buildFirmaElectronicaMap({
+    required Map<String, dynamic> signerData,
+    required String etapa,
+    required String accion,
+  }) {
+    final metodo = (signerData['metodo'] ?? '').toString().trim();
+    final payload = <String, dynamic>{
+      'estado': 'firmado',
+      'etapa': etapa,
+      'accion': accion,
+      'metodo': metodo.isEmpty ? 'certificado_digital_p12' : metodo,
+      'version': 2,
+      'firmadoEn': FieldValue.serverTimestamp(),
+      'firmadoEnCliente':
+          signerData['firmadoEnCliente'] ?? Timestamp.fromDate(DateTime.now()),
+    };
+
+    for (final key in const [
+      'nombre',
+      'correo',
+      'rol',
+      'cargo',
+      'cedula',
+      'sedeId',
+      'sede',
+      'firmaId',
+      'qrData',
+      'certFingerprint',
+      'certSerialNumber',
+    ]) {
+      final value = signerData[key];
+      if (value == null) {
+        continue;
+      }
+      if (value is String && value.trim().isEmpty) {
+        continue;
+      }
+      payload[key] = value;
+    }
+
+    return payload;
+  }
+
+  Map<String, dynamic> _buildFirmaElectronicaUpdatePayload({
+    required String prefix,
+    required Map<String, dynamic> signerData,
+    required String etapa,
+    required String accion,
+  }) {
+    final firma = _buildFirmaElectronicaMap(
+      signerData: signerData,
+      etapa: etapa,
+      accion: accion,
+    );
+    final payload = <String, dynamic>{};
+    firma.forEach((key, value) {
+      payload['$prefix.$key'] = value;
+    });
+    return payload;
+  }
+
+  bool _tieneArchivoFirmaElectronica(Map<String, dynamic> signerData) {
+    return (signerData['firmaId'] ?? '').toString().trim().isNotEmpty;
   }
 
   Future<void> registrarAceptacionTerminos({
@@ -799,10 +2054,44 @@ class FirebaseService {
     return false;
   }
 
-  String _formatearRangoHorario(Map<String, dynamic> data) {
-    final entrada = data['entrada']?.toString() ?? '--:--';
-    final salida = data['salida']?.toString() ?? '--:--';
-    return '$entrada a $salida';
+  String _normalizarHoraDesdeTexto(String value) {
+    final partes = value.trim().split(':');
+    if (partes.length < 2) {
+      return value.trim();
+    }
+
+    final horas = int.tryParse(partes[0]) ?? 0;
+    final minutos = int.tryParse(partes[1]) ?? 0;
+    return '${horas.toString().padLeft(2, '0')}:${minutos.toString().padLeft(2, '0')}';
+  }
+
+  Map<String, dynamic>? _crearHorarioFallbackDesdeIdentificador(
+    String idHorario,
+  ) {
+    final raw = idHorario.trim();
+    if (raw.isEmpty) {
+      return null;
+    }
+
+    final matches = RegExp(r'(\d{1,2}:\d{2})').allMatches(raw).toList();
+    if (matches.length < 2) {
+      return null;
+    }
+
+    final entrada = _normalizarHoraDesdeTexto(matches[0].group(1) ?? '');
+    final salida = _normalizarHoraDesdeTexto(matches[1].group(1) ?? '');
+    if (entrada.isEmpty || salida.isEmpty) {
+      return null;
+    }
+
+    final horarioNormalizado = raw.toUpperCase();
+    return {
+      'nombre': raw,
+      'entrada': entrada,
+      'salida': salida,
+      'es_tiempo_completo': horarioNormalizado.startsWith('TC'),
+      'origen': 'fallback_identificador',
+    };
   }
 
   Map<String, String>? _resolverHorarioAlmuerzoAsignado(
@@ -836,7 +2125,7 @@ class FirebaseService {
     List<dynamic> listaHorarios,
   ) async {
     final idHorarioTC = listaHorarios.firstWhere(
-      (h) => h.toString().startsWith('TC'),
+      (h) => h.toString().trim().toUpperCase().startsWith('TC'),
       orElse: () => '',
     );
 
@@ -886,6 +2175,32 @@ class FirebaseService {
     );
   }
 
+  List<String> resolverHorariosDisponiblesAlmuerzoUsuario(
+    Map<String, dynamic>? usuarioData,
+  ) {
+    final horariosPrincipales = _sanitizarListaHorariosDesdeUsuario(usuarioData);
+    final vinculaciones = resolverVinculacionesAsistenciaUsuario(usuarioData);
+    final horariosVinculados = vinculaciones
+        .map((vinculacion) => (vinculacion['horarioId'] ?? '').toString().trim())
+        .where((horario) => horario.isNotEmpty)
+        .toList();
+
+    return {
+      ...horariosPrincipales,
+      ...horariosVinculados,
+    }.toList();
+  }
+
+  bool usuarioTieneAlmuerzoHabilitado(Map<String, dynamic>? usuarioData) {
+    if (_resolverHorarioAlmuerzoAsignado(usuarioData) != null) {
+      return true;
+    }
+
+    return resolverHorariosDisponiblesAlmuerzoUsuario(
+      usuarioData,
+    ).any((horario) => horario.trim().toUpperCase().startsWith('TC'));
+  }
+
   Future<Map<String, Map<String, dynamic>>> _obtenerHorariosPorIds(
     List<dynamic> listaHorarios,
   ) async {
@@ -899,13 +2214,19 @@ class FirebaseService {
       ids.map((id) async {
         final doc = await _db.collection('horarios').doc(id).get();
         if (!doc.exists) {
-          return MapEntry<String, Map<String, dynamic>?>(id, null);
+          return MapEntry<String, Map<String, dynamic>?>(
+            id,
+            _crearHorarioFallbackDesdeIdentificador(id),
+          );
         }
 
-        return MapEntry<String, Map<String, dynamic>?>(
-          id,
-          doc.data() as Map<String, dynamic>,
-        );
+        final data = doc.data() as Map<String, dynamic>;
+        return MapEntry<String, Map<String, dynamic>?>(id, {
+          ...data,
+          'nombre': (data['nombre'] ?? '').toString().trim().isEmpty
+              ? id
+              : data['nombre'],
+        });
       }),
     );
 
@@ -918,40 +2239,57 @@ class FirebaseService {
   String _mensajeFueraDeHorario({
     required DateTime ahora,
     required List<Map<String, dynamic>> horariosEvaluados,
+    required bool esEntrada,
   }) {
+    final accion = esEntrada ? 'entrada' : 'salida';
+
     if (horariosEvaluados.isEmpty) {
-      return "No tienes clases programadas en este horario.";
+      return 'No tienes horarios programados para registrar $accion.';
     }
 
     horariosEvaluados.sort(
-      (a, b) => (a['entradaMin'] as int).compareTo(b['entradaMin'] as int),
+      (a, b) => (a['ventanaInicioMin'] as int).compareTo(
+        b['ventanaInicioMin'] as int,
+      ),
     );
 
     final ahoraMin = (ahora.hour * 60) + ahora.minute;
     final primerHorario = horariosEvaluados.first;
     final ultimoHorario = horariosEvaluados.last;
+    final primerInicioVentana = primerHorario['ventanaInicioMin'] as int;
+    final ultimoFinVentana = ultimoHorario['ventanaFinMin'] as int;
 
-    if (ahoraMin < (primerHorario['entradaMin'] as int)) {
-      return "Tu horario habilitado inicia de ${primerHorario['rango']}. Aun no puedes registrar asistencia.";
+    if (ahoraMin < primerInicioVentana) {
+      if (esEntrada) {
+        return 'La entrada se habilita 10 minutos antes del horario asignado. Tu proxima ventana sera de ${primerHorario['ventana']} para el horario ${primerHorario['rango']}.';
+      }
+      return 'Las marcaciones de $accion solo se habilitan 10 minutos antes y 10 minutos despues del horario asignado. Tu proxima ventana es de ${primerHorario['ventana']} para el horario ${primerHorario['rango']}.';
     }
 
-    if (ahoraMin > (ultimoHorario['salidaMin'] as int)) {
-      return "Tu horario habilitado de ${ultimoHorario['rango']} ya termino. Ya no puedes registrar asistencia.";
+    if (ahoraMin > ultimoFinVentana) {
+      return 'La ultima ventana disponible para registrar $accion fue de ${ultimoHorario['ventana']} para el horario ${ultimoHorario['rango']}.';
     }
 
     Map<String, dynamic>? siguienteHorario;
     for (final horario in horariosEvaluados) {
-      if (ahoraMin < (horario['entradaMin'] as int)) {
+      if (ahoraMin < (horario['ventanaInicioMin'] as int)) {
         siguienteHorario = horario;
         break;
       }
     }
 
     if (siguienteHorario != null) {
-      return "En este momento no tienes un bloque activo. Tu siguiente horario es de ${siguienteHorario['rango']}.";
+      if (esEntrada) {
+        return 'En este momento no tienes una jornada disponible para registrar entrada. Tu siguiente ventana sera de ${siguienteHorario['ventana']} para el horario ${siguienteHorario['rango']}.';
+      }
+      return 'En este momento no tienes una ventana activa para registrar $accion. Tu siguiente ventana sera de ${siguienteHorario['ventana']} para el horario ${siguienteHorario['rango']}.';
     }
 
-    return "No tienes clases programadas en este horario.";
+    if (esEntrada) {
+      return 'En este momento no tienes una jornada disponible para registrar entrada.';
+    }
+
+    return 'En este momento no tienes una ventana activa para registrar $accion.';
   }
 
   // Marcación: Busca en la lista de la captura con VALIDACIÓN DE ESTADO
@@ -1056,6 +2394,8 @@ class FirebaseService {
     required bool esEntrada,
     String? sedeId,
     String? sedeNombre,
+    List<Map<String, dynamic>>? vinculacionesAsistencia,
+    Map<String, dynamic>? contextoSeleccionado,
   }) async {
     // await _validarUbicacionGPS(); // Descomentar cuando se requiera GPS real
 
@@ -1069,10 +2409,11 @@ class FirebaseService {
         .limit(1)
         .get();
 
+    Map<String, dynamic>? ultimoDoc;
+    String ultimoTipo = '';
     if (ultimoRegistroQuery.docs.isNotEmpty) {
-      var ultimoDoc =
-          ultimoRegistroQuery.docs.first.data() as Map<String, dynamic>;
-      String ultimoTipo = ultimoDoc['tipo'] ?? "";
+      ultimoDoc = ultimoRegistroQuery.docs.first.data() as Map<String, dynamic>;
+      ultimoTipo = (ultimoDoc['tipo'] ?? "").toString();
 
       if (esEntrada && ultimoTipo == "ENTRADA") {
         throw Exception(
@@ -1093,6 +2434,270 @@ class FirebaseService {
     }
 
     // 2. LÓGICA DE HORARIOS
+    final usarVinculacionesMultiples =
+        (vinculacionesAsistencia != null &&
+            vinculacionesAsistencia.isNotEmpty) ||
+        contextoSeleccionado != null;
+
+    if (usarVinculacionesMultiples) {
+      final ahoraMin = (ahora.hour * 60) + ahora.minute;
+      final permisoActivoFuture = _obtenerPermisoAprobadoVigente(
+        nombreUsuario: nombreUsuario,
+        ahora: ahora,
+        ahoraMin: ahoraMin,
+        sedeId: sedeId,
+      );
+      final vinculacionesNormalizadas =
+          vinculacionesAsistencia?.whereType<Map<String, dynamic>>().toList() ??
+          listaHorarios
+              .map(
+                (horario) => _buildVinculacionAsistencia(
+                  tipoVinculacion: 'academico',
+                  rol: UserRoleAccess.roleTeacher,
+                  horarioId: horario.toString(),
+                  areaId: '',
+                  areaNombre: '',
+                  cargo: '',
+                ),
+              )
+              .toList();
+
+      final evaluacion = await _evaluarContextosMarcacion(
+        ahora: ahora,
+        esEntrada: esEntrada,
+        vinculacionesAsistencia: vinculacionesNormalizadas,
+        sedeId: sedeId,
+      );
+      final horariosEvaluados = List<Map<String, dynamic>>.from(
+        evaluacion['horariosEvaluados'] as List? ??
+            const <Map<String, dynamic>>[],
+      );
+      final contextosActivos = List<Map<String, dynamic>>.from(
+        evaluacion['activos'] as List? ?? const <Map<String, dynamic>>[],
+      );
+      final horarioEspecial =
+          evaluacion['horarioEspecial'] as Map<String, dynamic>?;
+      final toleranciaSalidaAntesMinutos =
+          evaluacion['toleranciaSalidaAntesMinutos'] as int? ??
+          _horarioEspecialToleranciaSalidaAntesDefault;
+      final toleranciaSalidaDespuesMinutos =
+          evaluacion['toleranciaSalidaDespuesMinutos'] as int? ??
+          _horarioEspecialToleranciaSalidaDespuesDefault;
+      final ventanaSalidaEspecialInicio =
+          evaluacion['ventanaSalidaEspecialInicio'] as int?;
+      final ventanaSalidaEspecialFin =
+          evaluacion['ventanaSalidaEspecialFin'] as int?;
+      final ventanaSalidaEspecialLabel =
+          (evaluacion['ventanaSalidaEspecialLabel'] ?? '').toString();
+
+      Map<String, dynamic>? horarioSeleccionado;
+      if (contextoSeleccionado != null) {
+        final horarioIdForzado = (contextoSeleccionado['horarioId'] ?? '')
+            .toString()
+            .trim()
+            .toUpperCase();
+        final tipoForzado = _normalizarTipoVinculacion(
+          contextoSeleccionado['tipoVinculacion'],
+        );
+        for (final contexto in contextosActivos) {
+          if ((contexto['horarioId'] ?? '').toString().trim().toUpperCase() ==
+                  horarioIdForzado &&
+              _normalizarTipoVinculacion(contexto['tipoVinculacion']) ==
+                  tipoForzado) {
+            horarioSeleccionado = contexto;
+            break;
+          }
+        }
+      } else if (contextosActivos.length == 1) {
+        horarioSeleccionado = contextosActivos.first;
+      } else if (contextosActivos.length > 1) {
+        throw Exception(
+          'Tienes mas de una jornada disponible en este momento. Debes seleccionar si registras como administrativo o como personal academico.',
+        );
+      }
+
+      if (!esEntrada && horarioSeleccionado == null) {
+        horarioSeleccionado = await _resolverContextoDesdeUltimaEntrada(
+          ultimoRegistro: ultimoDoc,
+          vinculacionesAsistencia: vinculacionesNormalizadas,
+          horarioEspecial: horarioEspecial,
+          horaEntradaEspecial: (evaluacion['horaEntradaEspecial'] ?? '')
+              .toString(),
+          horaSalidaEspecial: (evaluacion['horaSalidaEspecial'] ?? '')
+              .toString(),
+          ventanaSalidaEspecialLabel: ventanaSalidaEspecialLabel,
+        );
+      }
+
+      if (!esEntrada &&
+          horarioEspecial != null &&
+          ventanaSalidaEspecialInicio != null &&
+          ventanaSalidaEspecialFin != null &&
+          ahoraMin < ventanaSalidaEspecialInicio) {
+        throw Exception(
+          'La salida especial de hoy se habilita desde ${_minutosAHora(ventanaSalidaEspecialInicio)} y permanece disponible hasta ${_minutosAHora(ventanaSalidaEspecialFin)}.',
+        );
+      }
+
+      if (horarioSeleccionado == null) {
+        if (!esEntrada &&
+            horarioEspecial != null &&
+            ventanaSalidaEspecialInicio != null &&
+            ventanaSalidaEspecialFin != null) {
+          if (ahoraMin > ventanaSalidaEspecialFin) {
+            throw Exception(
+              'La ventana para registrar la salida especial fue de ${_minutosAHora(ventanaSalidaEspecialInicio)} a ${_minutosAHora(ventanaSalidaEspecialFin)}.',
+            );
+          }
+        }
+
+        throw Exception(
+          _mensajeFueraDeHorario(
+            ahora: ahora,
+            horariosEvaluados: horariosEvaluados,
+            esEntrada: esEntrada,
+          ),
+        );
+      }
+
+      final horaEntradaAplicada = (horarioSeleccionado['entrada'] ?? '00:00')
+          .toString();
+      final horaSalidaAplicada = (horarioSeleccionado['salida'] ?? '00:00')
+          .toString();
+      final horaEntradaBase =
+          (horarioSeleccionado['entrada_base'] ?? horaEntradaAplicada)
+              .toString();
+      final horaSalidaBase =
+          (horarioSeleccionado['salida_base'] ?? horaSalidaAplicada).toString();
+      final entradaAplicadaMin = _horaEnMinutos(horaEntradaAplicada);
+      final salidaAplicadaMin = _horaEnMinutos(horaSalidaAplicada);
+      final entradaPuntualFinMin =
+          entradaAplicadaMin + _registroMarcacionToleranciaMinutos;
+      final salidaCompletaInicioMin =
+          salidaAplicadaMin - _registroMarcacionToleranciaMinutos;
+      final salidaCompletaFinMin =
+          salidaAplicadaMin + _registroMarcacionToleranciaMinutos;
+      final horaActualStr = DateFormat('HH:mm').format(ahora);
+      final salidaBaseMin = _horaEnMinutos(horaSalidaBase);
+      final salidaEspecialDentroDeVentana =
+          !esEntrada &&
+          horarioEspecial != null &&
+          ventanaSalidaEspecialInicio != null &&
+          ventanaSalidaEspecialFin != null &&
+          ahoraMin >= ventanaSalidaEspecialInicio &&
+          ahoraMin <= ventanaSalidaEspecialFin;
+
+      var estado = 'A tiempo';
+      var estadoVisible = estado;
+      if (esEntrada && ahoraMin > entradaPuntualFinMin) {
+        estado = 'Atraso';
+        estadoVisible = estado;
+      } else if (!esEntrada && salidaEspecialDentroDeVentana) {
+        estado = salidaAplicadaMin < salidaBaseMin
+            ? 'Salida anticipada autorizada'
+            : 'Completada';
+        estadoVisible = estado;
+      } else if (!esEntrada && ahoraMin < salidaCompletaInicioMin) {
+        estado = 'Salida Anticipada';
+        estadoVisible = estado;
+      } else if (!esEntrada && ahoraMin > salidaCompletaFinMin) {
+        estado = 'Completada';
+        estadoVisible = 'Salida con retraso';
+      } else if (!esEntrada) {
+        estado = horarioEspecial != null && salidaAplicadaMin < salidaBaseMin
+            ? 'Salida anticipada autorizada'
+            : 'Completada';
+        estadoVisible = estado;
+      }
+
+      final permisoActivo = await permisoActivoFuture;
+      final rangoHorarioEspecial = horarioEspecial == null
+          ? ''
+          : '$horaEntradaAplicada a $horaSalidaAplicada';
+      final tipoVinculacion = _normalizarTipoVinculacion(
+        horarioSeleccionado['tipoVinculacion'],
+      );
+      final tipoVinculacionLabel =
+          (horarioSeleccionado['tipoVinculacionLabel'] ?? '')
+              .toString()
+              .trim()
+              .isEmpty
+          ? _etiquetaTipoVinculacion(tipoVinculacion)
+          : (horarioSeleccionado['tipoVinculacionLabel'] ?? '')
+                .toString()
+                .trim();
+
+      await _db.collection('asistencias_realizadas').add({
+        'docente': nombreUsuario,
+        'tipo': esEntrada ? 'ENTRADA' : 'SALIDA',
+        'horario_ref': horarioSeleccionado['nombre'],
+        'horario_id': (horarioSeleccionado['horarioId'] ?? '')
+            .toString()
+            .trim(),
+        'tipo_vinculacion': tipoVinculacion,
+        'tipo_vinculacion_label': tipoVinculacionLabel,
+        'rol_vinculado': (horarioSeleccionado['rolVinculado'] ?? '')
+            .toString()
+            .trim(),
+        'cargo_vinculado': (horarioSeleccionado['cargoVinculado'] ?? '')
+            .toString()
+            .trim(),
+        'area_vinculada': (horarioSeleccionado['areaVinculada'] ?? '')
+            .toString()
+            .trim(),
+        'vinculacion_secundaria': horarioSeleccionado['esSecundaria'] == true,
+        'hora_marcada': horaActualStr,
+        'estado': estado,
+        'estado_visible': estadoVisible,
+        'fecha': ahora,
+        'observacion': 'Registro realizado correctamente.',
+        'sedeId': sedeId,
+        'sede': sedeNombre,
+        'hora_entrada_oficial': horaEntradaAplicada,
+        'hora_salida_oficial': horaSalidaAplicada,
+        'hora_entrada_base': horaEntradaBase,
+        'hora_salida_base': horaSalidaBase,
+        'horario_especial_activo': horarioEspecial != null,
+        'horario_especial_documento_id':
+            horarioSeleccionado['horario_especial_documento_id'],
+        'horario_especial_fecha_clave':
+            horarioSeleccionado['horario_especial_fecha_clave'],
+        'horario_especial_motivo':
+            horarioSeleccionado['horario_especial_motivo'],
+        'horario_especial_hora_entrada':
+            horarioSeleccionado['horario_especial_entrada'],
+        'horario_especial_hora_salida':
+            horarioSeleccionado['horario_especial_salida'],
+        'horario_especial_tolerancia_antes_minutos':
+            toleranciaSalidaAntesMinutos,
+        'horario_especial_tolerancia_despues_minutos':
+            toleranciaSalidaDespuesMinutos,
+        'horario_especial_ventana_salida': ventanaSalidaEspecialLabel,
+        'horario_especial_rango': rangoHorarioEspecial,
+        'permiso_aprobado_activo': permisoActivo != null,
+        'permiso_horario': permisoActivo?['horario'],
+        'permiso_motivo': permisoActivo?['motivo'],
+        'permiso_documento_id': permisoActivo?['documentoId'],
+      });
+
+      return {
+        'estado': estadoVisible,
+        'estadoBase': estado,
+        'bloque': '${horarioSeleccionado['nombre']} · $tipoVinculacionLabel',
+        'hora': horaActualStr,
+        'tipoVinculacion': tipoVinculacion,
+        'tipoVinculacionLabel': tipoVinculacionLabel,
+        'permisoActivo': permisoActivo != null ? 'true' : 'false',
+        'horarioPermiso': permisoActivo?['horario'] ?? '',
+        'motivoPermiso': permisoActivo?['motivo'] ?? '',
+        'horarioEspecialActivo': horarioEspecial != null ? 'true' : 'false',
+        'horarioEspecialRango': rangoHorarioEspecial,
+        'horarioEspecialVentanaSalida': ventanaSalidaEspecialLabel,
+        'motivoHorarioEspecial':
+            (horarioSeleccionado['horario_especial_motivo'] ?? '').toString(),
+      };
+    }
+
     Map<String, dynamic>? horarioSeleccionado;
     final ahoraMin = (ahora.hour * 60) + ahora.minute;
     final List<Map<String, dynamic>> horariosEvaluados = [];
@@ -1102,67 +2707,176 @@ class FirebaseService {
       ahoraMin: ahoraMin,
       sedeId: sedeId,
     );
+    final horarioEspecial = sedeId != null && sedeId.trim().isNotEmpty
+        ? await obtenerHorarioEspecialSede(sedeId: sedeId.trim(), fecha: ahora)
+        : null;
+    final horaEntradaEspecial = (horarioEspecial?['horaEntradaEspecial'] ?? '')
+        .toString()
+        .trim();
+    final horaSalidaEspecial = (horarioEspecial?['horaSalidaEspecial'] ?? '')
+        .toString()
+        .trim();
+    final toleranciaSalidaAntesMinutos = _resolverToleranciaHorarioEspecial(
+      horarioEspecial?['toleranciaSalidaAntesMinutos'],
+      _horarioEspecialToleranciaSalidaAntesDefault,
+    );
+    final toleranciaSalidaDespuesMinutos = _resolverToleranciaHorarioEspecial(
+      horarioEspecial?['toleranciaSalidaDespuesMinutos'],
+      _horarioEspecialToleranciaSalidaDespuesDefault,
+    );
+    final salidaEspecialMin = horaSalidaEspecial.isEmpty
+        ? null
+        : _horaEnMinutos(horaSalidaEspecial);
+    final ventanaSalidaEspecialInicio = salidaEspecialMin == null
+        ? null
+        : salidaEspecialMin - toleranciaSalidaAntesMinutos;
+    final ventanaSalidaEspecialFin = salidaEspecialMin == null
+        ? null
+        : salidaEspecialMin + toleranciaSalidaDespuesMinutos;
+    final ventanaSalidaEspecialLabel =
+        ventanaSalidaEspecialInicio == null || ventanaSalidaEspecialFin == null
+        ? ''
+        : '${_minutosAHora(ventanaSalidaEspecialInicio)} a ${_minutosAHora(ventanaSalidaEspecialFin)}';
     final horariosDisponibles = await _obtenerHorariosPorIds(listaHorarios);
 
     for (final horario in listaHorarios) {
       final id = horario.toString();
       final data = horariosDisponibles[id];
       if (data == null) continue;
-      final entrada = data['entrada']?.toString() ?? '00:00';
-      final salida = data['salida']?.toString() ?? '00:00';
+      final entradaBase = data['entrada']?.toString() ?? '00:00';
+      final salidaBase = data['salida']?.toString() ?? '00:00';
+      final entrada = horaEntradaEspecial.isNotEmpty
+          ? horaEntradaEspecial
+          : entradaBase;
+      final salida = horaSalidaEspecial.isNotEmpty
+          ? horaSalidaEspecial
+          : salidaBase;
       final entradaMin = _horaEnMinutos(entrada);
       final salidaMin = _horaEnMinutos(salida);
       final esTiempoCompleto = _esHorarioTiempoCompleto(id, data);
+      final referenciaMarcacionMin = esEntrada ? entradaMin : salidaMin;
+      final ventanaNormal = _ventanaMarcacionDesdeReferencia(
+        referenciaMarcacionMin,
+      );
+      final ventanaMarcacionInicio =
+          !esEntrada &&
+              horarioEspecial != null &&
+              ventanaSalidaEspecialInicio != null &&
+              ventanaSalidaEspecialFin != null
+          ? ventanaSalidaEspecialInicio
+          : ventanaNormal.inicio;
+      final ventanaMarcacionFin =
+          !esEntrada &&
+              horarioEspecial != null &&
+              ventanaSalidaEspecialInicio != null &&
+              ventanaSalidaEspecialFin != null
+          ? ventanaSalidaEspecialFin
+          : ventanaNormal.fin;
 
       horariosEvaluados.add({
         'id': id,
         'entradaMin': entradaMin,
         'salidaMin': salidaMin,
-        'rango': _formatearRangoHorario(data),
+        'rango': '$entrada a $salida',
         'esTiempoCompleto': esTiempoCompleto,
+        'ventanaInicioMin': ventanaMarcacionInicio,
+        'ventanaFinMin': ventanaMarcacionFin,
+        'ventana': _etiquetaVentanaMarcacion(
+          ventanaMarcacionInicio,
+          ventanaMarcacionFin,
+        ),
       });
 
-      final bool horarioActivo;
-      if (esTiempoCompleto) {
-        final horaInicio = int.parse(entrada.split(":")[0]);
-        final horaFin = int.parse(salida.split(":")[0]);
-        horarioActivo =
-            ahora.hour >= (horaInicio - 1) && ahora.hour <= (horaFin + 1);
-      } else {
-        horarioActivo = ahoraMin >= entradaMin && ahoraMin <= salidaMin;
-      }
+      final horarioActivo =
+          ahoraMin >= ventanaMarcacionInicio && ahoraMin <= ventanaMarcacionFin;
 
       if (horarioActivo) {
-        horarioSeleccionado = data;
+        horarioSeleccionado = {
+          ...data,
+          'entrada': entrada,
+          'salida': salida,
+          'entrada_base': entradaBase,
+          'salida_base': salidaBase,
+          'horario_especial_documento_id': horarioEspecial?['documentoId'],
+          'horario_especial_fecha_clave': horarioEspecial?['fechaClave'],
+          'horario_especial_motivo': horarioEspecial?['motivo'],
+          'horario_especial_entrada': horaEntradaEspecial,
+          'horario_especial_salida': horaSalidaEspecial,
+        };
         break;
       }
     }
 
     if (horarioSeleccionado == null) {
+      if (!esEntrada &&
+          horarioEspecial != null &&
+          ventanaSalidaEspecialInicio != null &&
+          ventanaSalidaEspecialFin != null) {
+        if (ahoraMin < ventanaSalidaEspecialInicio) {
+          throw Exception(
+            'La salida especial de hoy se habilita desde ${_minutosAHora(ventanaSalidaEspecialInicio)} y permanece disponible hasta ${_minutosAHora(ventanaSalidaEspecialFin)}.',
+          );
+        }
+
+        if (ahoraMin > ventanaSalidaEspecialFin) {
+          throw Exception(
+            'La ventana para registrar la salida especial fue de ${_minutosAHora(ventanaSalidaEspecialInicio)} a ${_minutosAHora(ventanaSalidaEspecialFin)}.',
+          );
+        }
+      }
+
       throw Exception(
         _mensajeFueraDeHorario(
           ahora: ahora,
           horariosEvaluados: horariosEvaluados,
+          esEntrada: esEntrada,
         ),
       );
     }
 
+    final horaEntradaAplicada = (horarioSeleccionado['entrada'] ?? '00:00')
+        .toString();
+    final horaSalidaAplicada = (horarioSeleccionado['salida'] ?? '00:00')
+        .toString();
+    final horaEntradaBase =
+        (horarioSeleccionado['entrada_base'] ?? horaEntradaAplicada).toString();
+    final horaSalidaBase =
+        (horarioSeleccionado['salida_base'] ?? horaSalidaAplicada).toString();
+
     String horaOficialStr = esEntrada
-        ? horarioSeleccionado['entrada']
-        : horarioSeleccionado['salida'];
+        ? horaEntradaAplicada
+        : horaSalidaAplicada;
     int horaLimite = _horaEnMinutos(horaOficialStr);
     String horaActualStr = DateFormat('HH:mm').format(ahora);
+    final salidaAplicadaMin = _horaEnMinutos(horaSalidaAplicada);
+    final salidaBaseMin = _horaEnMinutos(horaSalidaBase);
+    final salidaEspecialDentroDeVentana =
+        !esEntrada &&
+        horarioEspecial != null &&
+        ventanaSalidaEspecialInicio != null &&
+        ventanaSalidaEspecialFin != null &&
+        ahoraMin >= ventanaSalidaEspecialInicio &&
+        ahoraMin <= ventanaSalidaEspecialFin;
 
     String estado = "A tiempo";
     if (esEntrada && ahoraMin > horaLimite) {
       estado = "Atraso";
+    } else if (!esEntrada && salidaEspecialDentroDeVentana) {
+      estado = salidaAplicadaMin < salidaBaseMin
+          ? "Salida anticipada autorizada"
+          : "Completada";
     } else if (!esEntrada && ahoraMin < horaLimite) {
       estado = "Salida Anticipada";
     } else if (!esEntrada) {
-      estado = "Completada";
+      estado = horarioEspecial != null && salidaAplicadaMin < salidaBaseMin
+          ? "Salida anticipada autorizada"
+          : "Completada";
     }
 
     final permisoActivo = await permisoActivoFuture;
+    final rangoHorarioEspecial = horarioEspecial == null
+        ? ''
+        : '$horaEntradaAplicada a $horaSalidaAplicada';
 
     // 3. GUARDAR REGISTRO
     await _db.collection('asistencias_realizadas').add({
@@ -1175,6 +2889,25 @@ class FirebaseService {
       'observacion': "Registro realizado correctamente.",
       'sedeId': sedeId,
       'sede': sedeNombre,
+      'hora_entrada_oficial': horaEntradaAplicada,
+      'hora_salida_oficial': horaSalidaAplicada,
+      'hora_entrada_base': horaEntradaBase,
+      'hora_salida_base': horaSalidaBase,
+      'horario_especial_activo': horarioEspecial != null,
+      'horario_especial_documento_id':
+          horarioSeleccionado['horario_especial_documento_id'],
+      'horario_especial_fecha_clave':
+          horarioSeleccionado['horario_especial_fecha_clave'],
+      'horario_especial_motivo': horarioSeleccionado['horario_especial_motivo'],
+      'horario_especial_hora_entrada':
+          horarioSeleccionado['horario_especial_entrada'],
+      'horario_especial_hora_salida':
+          horarioSeleccionado['horario_especial_salida'],
+      'horario_especial_tolerancia_antes_minutos': toleranciaSalidaAntesMinutos,
+      'horario_especial_tolerancia_despues_minutos':
+          toleranciaSalidaDespuesMinutos,
+      'horario_especial_ventana_salida': ventanaSalidaEspecialLabel,
+      'horario_especial_rango': rangoHorarioEspecial,
       'permiso_aprobado_activo': permisoActivo != null,
       'permiso_horario': permisoActivo?['horario'],
       'permiso_motivo': permisoActivo?['motivo'],
@@ -1188,6 +2921,11 @@ class FirebaseService {
       'permisoActivo': permisoActivo != null ? 'true' : 'false',
       'horarioPermiso': permisoActivo?['horario'] ?? '',
       'motivoPermiso': permisoActivo?['motivo'] ?? '',
+      'horarioEspecialActivo': horarioEspecial != null ? 'true' : 'false',
+      'horarioEspecialRango': rangoHorarioEspecial,
+      'horarioEspecialVentanaSalida': ventanaSalidaEspecialLabel,
+      'motivoHorarioEspecial':
+          (horarioSeleccionado['horario_especial_motivo'] ?? '').toString(),
     };
   }
 
@@ -1231,16 +2969,32 @@ class FirebaseService {
     }
   }
 
-  Future<Map<String, dynamic>?> obtenerDatosPerfil(String correo) async {
+  Future<Map<String, dynamic>?> obtenerDatosPerfil(
+    String correo, {
+    String? sedeId,
+  }) async {
     try {
       QuerySnapshot snapshot = await _db
           .collection('usuarios')
           .where('correo', isEqualTo: correo)
-          .limit(1)
           .get();
 
       if (snapshot.docs.isNotEmpty) {
-        return snapshot.docs.first.data() as Map<String, dynamic>;
+        QueryDocumentSnapshot? perfilDoc;
+        final sedeObjetivo = SedeAccess.normalize(sedeId);
+
+        if (sedeObjetivo.isNotEmpty) {
+          for (final doc in snapshot.docs) {
+            final data = doc.data() as Map<String, dynamic>;
+            if (SedeAccess.matchesSede(data, sedeObjetivo)) {
+              perfilDoc = doc;
+              break;
+            }
+          }
+        }
+
+        perfilDoc ??= snapshot.docs.first;
+        return _sanitizarDatosUsuario(perfilDoc.data() as Map<String, dynamic>);
       }
     } catch (e) {
       debugPrint("Error al obtener perfil: $e");
@@ -1317,8 +3071,12 @@ class FirebaseService {
   // Registrar salida al almuerzo
   Future<void> registrarInicioAlmuerzo(String correo) async {
     final usuarioData = await _obtenerUsuarioPorCorreo(correo);
-    final List<dynamic> horarios = usuarioData?['horarios_asignados'] ?? [];
-    final bool esTC = horarios.any((h) => h.toString().startsWith("TC"));
+    final List<dynamic> horarios = resolverHorariosDisponiblesAlmuerzoUsuario(
+      usuarioData,
+    );
+    final bool esTC = horarios.any(
+      (h) => h.toString().trim().toUpperCase().startsWith("TC"),
+    );
     final horarioAlmuerzo = await _resolverHorarioAlmuerzoUsuario(
       usuarioData: usuarioData,
       listaHorarios: horarios,
@@ -1398,7 +3156,10 @@ class FirebaseService {
   // ==========================================
 
   // ESTA ES LA ÚNICA VERSIÓN QUE DEBE QUEDAR
-  Future<void> enviarSolicitud(Solicitud solicitud) async {
+  Future<void> enviarSolicitud(
+    Solicitud solicitud, {
+    String? signingPassword,
+  }) async {
     try {
       final solicitudesRef = _db.collection('solicitudes');
       final nuevaSolicitudRef = solicitudesRef.doc();
@@ -1407,6 +3168,31 @@ class FirebaseService {
       );
       final tipoSolicitud = _resolverTipoSolicitud(solicitud.tipo);
       final sedeSolicitud = _resolverSedeSolicitud(solicitud.sedeId);
+      Map<String, dynamic>? firmaSolicitante;
+      final signingKey = signingPassword?.trim() ?? '';
+      final correoSolicitante = MatrizApprovalFlow.normalizeEmail(
+        solicitud.colaboradorCorreo,
+      );
+      if (signingKey.isNotEmpty) {
+        if (correoSolicitante.isEmpty) {
+          throw Exception(
+            'No se pudo identificar el correo del solicitante para aplicar la firma.',
+          );
+        }
+
+        final userDataFirmante = await autorizarFirmaPerfilUsuario(
+          correo: correoSolicitante,
+          sedeId: solicitud.sedeId,
+          signingPassword: signingKey,
+          requireDigitalCertificate: true,
+        );
+        firmaSolicitante = await _resolverDatosFirmaElectronica(
+          correo: correoSolicitante,
+          nombre: solicitud.colaborador,
+          fallbackUserData: userDataFirmante,
+          sedeIdFallback: solicitud.sedeId,
+        );
+      }
       final siguienteNumero = await _obtenerSiguienteNumeroFormularioPorTipo(
         tipoSolicitud: tipoSolicitud,
         sedeId: sedeSolicitud,
@@ -1415,7 +3201,7 @@ class FirebaseService {
         siguienteNumero,
       );
 
-      await nuevaSolicitudRef.set({
+      final payload = <String, dynamic>{
         ...solicitud.toMap(),
         'numFormulario': numeroFormularioGenerado,
         'numFormularioSecuencia': siguienteNumero,
@@ -1434,7 +3220,25 @@ class FirebaseService {
         'aprobadoresFinalesEmails': usaFlujoMatriz
             ? MatrizApprovalFlow.finalReviewerEmails.toList()
             : null,
-      });
+      };
+
+      if (firmaSolicitante != null &&
+          _tieneArchivoFirmaElectronica(firmaSolicitante)) {
+        payload['firmasElectronicas'] = {
+          'solicitante': _buildFirmaElectronicaMap(
+            signerData: firmaSolicitante,
+            etapa: 'solicitante',
+            accion: 'envio',
+          ),
+        };
+      }
+
+      await nuevaSolicitudRef.set(payload);
+
+      await reenumerarSolicitudesPorGrupo(
+        tipoSolicitud: tipoSolicitud,
+        sedeId: sedeSolicitud,
+      );
 
       await _crearAvisosNuevaSolicitudRRHH(
         idDoc: nuevaSolicitudRef.id,
@@ -1455,40 +3259,16 @@ class FirebaseService {
 
     try {
       final solicitudSnapshot = await solicitudRef.get();
-      final solicitudData =
-          solicitudSnapshot.data() as Map<String, dynamic>? ?? data;
+      final solicitudData = solicitudSnapshot.data() ?? data;
       final tipoSolicitud = _resolverTipoSolicitud(solicitudData['tipo']);
       final sedeSolicitud = _resolverSedeSolicitud(solicitudData['sedeId']);
-      final secuenciaActual = await _obtenerNumeroFormularioActualPorTipo(
+      await reenumerarSolicitudesPorGrupo(
         tipoSolicitud: tipoSolicitud,
         sedeId: sedeSolicitud,
-        solicitudId: idDoc,
       );
-      final numeroFormateado = _formatearNumeroFormulario(secuenciaActual);
-      final numeroExistente =
-          solicitudData['numFormulario']?.toString().trim() ?? '';
-      final secuenciaExistente =
-          (solicitudData['numFormularioSecuencia'] as num?)?.toInt();
 
-      if (numeroExistente == numeroFormateado &&
-          secuenciaExistente == secuenciaActual) {
-        return solicitudData;
-      }
-
-      await solicitudRef.set({
-        'numFormulario': numeroFormateado,
-        'numFormularioSecuencia': secuenciaActual,
-        'numFormularioTipo': tipoSolicitud,
-        'numFormularioSedeId': sedeSolicitud,
-      }, SetOptions(merge: true));
-
-      return {
-        ...solicitudData,
-        'numFormulario': numeroFormateado,
-        'numFormularioSecuencia': secuenciaActual,
-        'numFormularioTipo': tipoSolicitud,
-        'numFormularioSedeId': sedeSolicitud,
-      };
+      final solicitudActualizada = await solicitudRef.get();
+      return solicitudActualizada.data() ?? solicitudData;
     } catch (e) {
       throw Exception("Error al generar el numero del formulario: $e");
     }
@@ -1508,6 +3288,25 @@ class FirebaseService {
       return SedeAccess.matrizId;
     }
     return normalizada;
+  }
+
+  String _claveGrupoSolicitud({
+    required String tipoSolicitud,
+    required String sedeId,
+  }) {
+    return '${_resolverSedeSolicitud(sedeId)}||${_resolverTipoSolicitud(tipoSolicitud)}';
+  }
+
+  ({String sedeId, String tipoSolicitud}) _parseClaveGrupoSolicitud(
+    String value,
+  ) {
+    final parts = value.split('||');
+    final sedeId = parts.isNotEmpty ? parts.first : SedeAccess.matrizId;
+    final tipoSolicitud = parts.length > 1 ? parts[1] : 'Solicitud';
+    return (
+      sedeId: _resolverSedeSolicitud(sedeId),
+      tipoSolicitud: _resolverTipoSolicitud(tipoSolicitud),
+    );
   }
 
   String _formatearNumeroFormulario(int numero) {
@@ -1549,34 +3348,159 @@ class FirebaseService {
     return snapshot.docs.length + 1;
   }
 
-  Future<int> _obtenerNumeroFormularioActualPorTipo({
+  Future<void> _aplicarNumeracionSecuencialSolicitudesDocs(
+    List<QueryDocumentSnapshot> docs, {
     required String tipoSolicitud,
     required String sedeId,
-    required String solicitudId,
   }) async {
-    final snapshot = await _db
-        .collection('solicitudes')
-        .where('tipo', isEqualTo: tipoSolicitud)
-        .where('sedeId', isEqualTo: sedeId)
-        .get();
-
-    final docs = snapshot.docs.toList()
-      ..sort((a, b) {
-        final fechaA = _resolverFechaOrdenSolicitud(a.data());
-        final fechaB = _resolverFechaOrdenSolicitud(b.data());
-        final comparacionFecha = fechaA.compareTo(fechaB);
-        if (comparacionFecha != 0) {
-          return comparacionFecha;
-        }
-        return a.id.compareTo(b.id);
-      });
-
-    final index = docs.indexWhere((doc) => doc.id == solicitudId);
-    if (index >= 0) {
-      return index + 1;
+    if (docs.isEmpty) {
+      return;
     }
 
-    return docs.length + 1;
+    docs.sort((a, b) {
+      final fechaA = _resolverFechaOrdenSolicitud(
+        a.data() as Map<String, dynamic>,
+      );
+      final fechaB = _resolverFechaOrdenSolicitud(
+        b.data() as Map<String, dynamic>,
+      );
+      final comparacionFecha = fechaA.compareTo(fechaB);
+      if (comparacionFecha != 0) {
+        return comparacionFecha;
+      }
+      return a.id.compareTo(b.id);
+    });
+
+    WriteBatch batch = _db.batch();
+    var operacionesPendientes = 0;
+
+    Future<void> commitBatch() async {
+      if (operacionesPendientes == 0) {
+        return;
+      }
+      await batch.commit();
+      batch = _db.batch();
+      operacionesPendientes = 0;
+    }
+
+    for (var index = 0; index < docs.length; index++) {
+      final doc = docs[index];
+      final data = doc.data() as Map<String, dynamic>;
+      final secuenciaEsperada = index + 1;
+      final numeroEsperado = _formatearNumeroFormulario(secuenciaEsperada);
+      final numeroActual = (data['numFormulario'] ?? '').toString().trim();
+      final secuenciaActual = (data['numFormularioSecuencia'] as num?)?.toInt();
+      final tipoActual = _resolverTipoSolicitud(data['numFormularioTipo']);
+      final sedeActual = _resolverSedeSolicitud(data['numFormularioSedeId']);
+
+      if (numeroActual == numeroEsperado &&
+          secuenciaActual == secuenciaEsperada &&
+          tipoActual == tipoSolicitud &&
+          sedeActual == sedeId) {
+        continue;
+      }
+
+      batch.set(doc.reference, {
+        'numFormulario': numeroEsperado,
+        'numFormularioSecuencia': secuenciaEsperada,
+        'numFormularioTipo': tipoSolicitud,
+        'numFormularioSedeId': sedeId,
+      }, SetOptions(merge: true));
+      operacionesPendientes++;
+
+      if (operacionesPendientes >= 400) {
+        await commitBatch();
+      }
+    }
+
+    await commitBatch();
+  }
+
+  Future<void> reenumerarSolicitudesPorGrupo({
+    required String tipoSolicitud,
+    required String sedeId,
+  }) async {
+    final tipoNormalizado = _resolverTipoSolicitud(tipoSolicitud);
+    final sedeNormalizada = _resolverSedeSolicitud(sedeId);
+    final snapshot = await _db
+        .collection('solicitudes')
+        .where('tipo', isEqualTo: tipoNormalizado)
+        .where('sedeId', isEqualTo: sedeNormalizada)
+        .get();
+
+    await _aplicarNumeracionSecuencialSolicitudesDocs(
+      snapshot.docs,
+      tipoSolicitud: tipoNormalizado,
+      sedeId: sedeNormalizada,
+    );
+  }
+
+  Future<void> sincronizarNumeracionSolicitudesDesdeDocs(
+    Iterable<QueryDocumentSnapshot> docs, {
+    String? sedeId,
+  }) async {
+    final sedeFiltro = SedeAccess.normalize(sedeId);
+    final grupos = <String, List<QueryDocumentSnapshot>>{};
+
+    for (final doc in docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      final sedeSolicitud = _resolverSedeSolicitud(data['sedeId']);
+      if (sedeFiltro.isNotEmpty && sedeSolicitud != sedeFiltro) {
+        continue;
+      }
+
+      final tipoSolicitud = _resolverTipoSolicitud(data['tipo']);
+      final clave = _claveGrupoSolicitud(
+        tipoSolicitud: tipoSolicitud,
+        sedeId: sedeSolicitud,
+      );
+      grupos.putIfAbsent(clave, () => <QueryDocumentSnapshot>[]).add(doc);
+    }
+
+    for (final entry in grupos.entries) {
+      final grupo = _parseClaveGrupoSolicitud(entry.key);
+      await _aplicarNumeracionSecuencialSolicitudesDocs(
+        entry.value,
+        tipoSolicitud: grupo.tipoSolicitud,
+        sedeId: grupo.sedeId,
+      );
+    }
+  }
+
+  Future<void> sincronizarNumeracionSolicitudesPorColaborador({
+    required String nombre,
+    String? sedeId,
+  }) async {
+    final sedeFiltro = SedeAccess.normalize(sedeId);
+    final snapshot = await _db
+        .collection('solicitudes')
+        .where('colaborador', isEqualTo: nombre)
+        .get();
+
+    final grupos = <String>{};
+
+    for (final doc in snapshot.docs) {
+      final data = doc.data();
+      final sedeSolicitud = _resolverSedeSolicitud(data['sedeId']);
+      if (sedeFiltro.isNotEmpty && sedeSolicitud != sedeFiltro) {
+        continue;
+      }
+
+      grupos.add(
+        _claveGrupoSolicitud(
+          tipoSolicitud: _resolverTipoSolicitud(data['tipo']),
+          sedeId: sedeSolicitud,
+        ),
+      );
+    }
+
+    for (final clave in grupos) {
+      final grupo = _parseClaveGrupoSolicitud(clave);
+      await reenumerarSolicitudesPorGrupo(
+        tipoSolicitud: grupo.tipoSolicitud,
+        sedeId: grupo.sedeId,
+      );
+    }
   }
 
   // 2. Escuchar solicitudes pendientes en tiempo real (Para la Web RRHH)
@@ -1594,10 +3518,28 @@ class FirebaseService {
     String nuevoEstado, {
     String? reviewerEmail,
     String? reviewerName,
+    Map<String, dynamic>? reviewerUserData,
+    String? signingPassword,
   }) async {
     try {
       final solicitudRef = _db.collection('solicitudes').doc(idDoc);
       final normalizedEmail = MatrizApprovalFlow.normalizeEmail(reviewerEmail);
+      final reviewerDocId = reviewerUserData?['docId']?.toString();
+      final reviewerSedeId = reviewerUserData == null
+          ? null
+          : SedeAccess.resolveSedeId(reviewerUserData);
+      final reviewerDataAutorizado = await autorizarFirmaPerfilUsuario(
+        userDocId: reviewerDocId,
+        correo: normalizedEmail,
+        sedeId: reviewerSedeId,
+        signingPassword: signingPassword ?? '',
+        requireDigitalCertificate: true,
+      );
+      final firmaRevisor = await _resolverDatosFirmaElectronica(
+        correo: normalizedEmail,
+        nombre: reviewerName,
+        fallbackUserData: reviewerDataAutorizado,
+      );
       Map<String, dynamic>? solicitudFinal;
       var debeNotificarAprobacion = false;
 
@@ -1615,7 +3557,14 @@ class FirebaseService {
                 SedeAccess.normalize(data['estado']) == 'pendiente');
 
         if (!usaFlujoMatriz) {
+          final firmaResolucion = _buildFirmaElectronicaUpdatePayload(
+            prefix: 'firmasElectronicas.resolucion',
+            signerData: firmaRevisor,
+            etapa: 'resolucion',
+            accion: nuevoEstado,
+          );
           transaction.update(solicitudRef, {
+            ...firmaResolucion,
             'estado': nuevoEstado,
             'fecha_resolucion': FieldValue.serverTimestamp(),
             'resueltoPorEmail': normalizedEmail.isEmpty
@@ -1641,12 +3590,19 @@ class FirebaseService {
         if (etapaActual == MatrizApprovalFlow.stagePrimary) {
           if (!MatrizApprovalFlow.isPrimaryReviewer(normalizedEmail)) {
             throw Exception(
-              'Solo ${MatrizApprovalFlow.primaryReviewerEmail} puede hacer la primera revision de Matriz.',
+              'Solo ${MatrizApprovalFlow.primaryReviewerEmail} puede hacer la aprobacion previa de Matriz.',
             );
           }
 
           if (nuevoEstado == 'aprobado') {
+            final firmaRevisionPrimaria = _buildFirmaElectronicaUpdatePayload(
+              prefix: 'firmasElectronicas.revisionPrimaria',
+              signerData: firmaRevisor,
+              etapa: MatrizApprovalFlow.stagePrimary,
+              accion: nuevoEstado,
+            );
             transaction.update(solicitudRef, {
+              ...firmaRevisionPrimaria,
               'estado': 'pendiente',
               'flujoAprobacion': MatrizApprovalFlow.flowId,
               'etapaAprobacion': MatrizApprovalFlow.stageFinal,
@@ -1664,7 +3620,14 @@ class FirebaseService {
             return;
           }
 
+          final firmaRevisionPrimaria = _buildFirmaElectronicaUpdatePayload(
+            prefix: 'firmasElectronicas.revisionPrimaria',
+            signerData: firmaRevisor,
+            etapa: MatrizApprovalFlow.stagePrimary,
+            accion: nuevoEstado,
+          );
           transaction.update(solicitudRef, {
+            ...firmaRevisionPrimaria,
             'estado': nuevoEstado,
             'flujoAprobacion': MatrizApprovalFlow.flowId,
             'etapaAprobacion': MatrizApprovalFlow.stageCompleted,
@@ -1686,7 +3649,14 @@ class FirebaseService {
           );
         }
 
+        final firmaAutorizacionFinal = _buildFirmaElectronicaUpdatePayload(
+          prefix: 'firmasElectronicas.autorizacionFinal',
+          signerData: firmaRevisor,
+          etapa: MatrizApprovalFlow.stageFinal,
+          accion: nuevoEstado,
+        );
         transaction.update(solicitudRef, {
+          ...firmaAutorizacionFinal,
           'estado': nuevoEstado,
           'flujoAprobacion': MatrizApprovalFlow.flowId,
           'etapaAprobacion': MatrizApprovalFlow.stageCompleted,
@@ -1991,7 +3961,7 @@ class FirebaseService {
   }) async {
     final userRef = _db.collection('usuarios').doc(usuarioDocId);
     final userSnapshot = await userRef.get();
-    final actual = userSnapshot.data() as Map<String, dynamic>? ?? {};
+    final actual = userSnapshot.data() ?? {};
     final horarioAnterior = (actual['almuerzo_horario_label'] ?? '')
         .toString()
         .trim();
@@ -2072,24 +4042,861 @@ class FirebaseService {
     return 'medio_tiempo';
   }
 
+  String _normalizarAreaTexto(String value) {
+    return value
+        .trim()
+        .toLowerCase()
+        .replaceAll('á', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('ñ', 'n');
+  }
+
+  String _slugArea(String value) {
+    final normalized = _normalizarAreaTexto(value)
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
+    return normalized.isEmpty ? 'general' : normalized;
+  }
+
+  String _defaultAreaNombreForRole(String rol) {
+    if (UserRoleAccess.isTeacherRole(rol)) {
+      return 'Docencia';
+    }
+    if (UserRoleAccess.isAdministrativeRole(rol)) {
+      return 'Administracion';
+    }
+    if (UserRoleAccess.isRrhhRole(rol)) {
+      return 'RRHH';
+    }
+    if (UserRoleAccess.isAdminRole(rol)) {
+      return 'Administracion';
+    }
+    return 'General';
+  }
+
+  String _defaultCargoForRole(String rol) {
+    if (UserRoleAccess.isTeacherRole(rol)) {
+      return 'Docente';
+    }
+    if (UserRoleAccess.isAdministrativeRole(rol)) {
+      return 'Administrativo';
+    }
+    if (UserRoleAccess.isRrhhRole(rol)) {
+      return 'Analista RRHH';
+    }
+    if (UserRoleAccess.isAdminRole(rol)) {
+      return 'Administrador';
+    }
+    return 'Colaborador';
+  }
+
+  String _buildEspecialidadLegacy({
+    required String areaNombre,
+    required String cargo,
+  }) {
+    if (areaNombre.isEmpty && cargo.isEmpty) {
+      return '';
+    }
+    if (areaNombre.isEmpty) {
+      return cargo;
+    }
+    if (cargo.isEmpty) {
+      return areaNombre;
+    }
+    if (_normalizarAreaTexto(areaNombre) == _normalizarAreaTexto(cargo)) {
+      return cargo;
+    }
+    return '$areaNombre - $cargo';
+  }
+
+  String _resolverTipoVinculacionDesdeRol(dynamic rol) {
+    if (UserRoleAccess.isAdministrativeRole(rol) ||
+        UserRoleAccess.isRrhhRole(rol) ||
+        UserRoleAccess.isAdminRole(rol)) {
+      return 'administrativo';
+    }
+    return 'academico';
+  }
+
+  String _normalizarTipoVinculacion(dynamic value) {
+    final normalized = value?.toString().trim().toLowerCase() ?? '';
+    if (normalized == 'administrativo') {
+      return 'administrativo';
+    }
+    return 'academico';
+  }
+
+  String _etiquetaTipoVinculacion(String tipo) {
+    return tipo == 'administrativo'
+        ? UserRoleAccess.roleAdministrative
+        : 'Personal academico';
+  }
+
+  List<String> _sanitizarListaHorariosDesdeUsuario(Map<String, dynamic>? data) {
+    return (data?['horarios_asignados'] as List? ?? const [])
+        .map((e) => e.toString().trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+  }
+
+  Map<String, dynamic> _buildVinculacionAsistencia({
+    required String tipoVinculacion,
+    required String rol,
+    required String horarioId,
+    required String areaId,
+    required String areaNombre,
+    required String cargo,
+    bool esSecundaria = false,
+  }) {
+    return {
+      'tipoVinculacion': _normalizarTipoVinculacion(tipoVinculacion),
+      'rol': rol.trim(),
+      'horarioId': horarioId.trim().toUpperCase(),
+      'areaId': areaId.trim(),
+      'areaNombre': areaNombre.trim(),
+      'cargo': cargo.trim(),
+      'esSecundaria': esSecundaria,
+    };
+  }
+
+  List<Map<String, dynamic>> resolverVinculacionesAsistenciaUsuario(
+    Map<String, dynamic>? usuarioData,
+  ) {
+    if (usuarioData == null) {
+      return const <Map<String, dynamic>>[];
+    }
+
+    final raw = usuarioData['vinculacionesAsistencia'];
+    if (raw is List) {
+      final items = raw
+          .whereType<Map>()
+          .map(
+            (entry) => _buildVinculacionAsistencia(
+              tipoVinculacion:
+                  (entry['tipoVinculacion'] ??
+                          _resolverTipoVinculacionDesdeRol(entry['rol']))
+                      .toString(),
+              rol: (entry['rol'] ?? '').toString(),
+              horarioId: (entry['horarioId'] ?? '').toString(),
+              areaId: (entry['areaId'] ?? '').toString(),
+              areaNombre: (entry['areaNombre'] ?? '').toString(),
+              cargo: (entry['cargo'] ?? '').toString(),
+              esSecundaria: entry['esSecundaria'] == true,
+            ),
+          )
+          .where((entry) => (entry['horarioId'] ?? '').toString().isNotEmpty)
+          .toList();
+
+      if (items.isNotEmpty) {
+        return items;
+      }
+    }
+
+    final rolPrincipal = _resolverRolPersonal(usuarioData['rol']);
+    final horariosPrincipales = _sanitizarListaHorariosDesdeUsuario(
+      usuarioData,
+    );
+    final horarioPrincipal = horariosPrincipales.isNotEmpty
+        ? horariosPrincipales.first
+        : '';
+    final areaIdPrincipal = (usuarioData['areaId'] ?? '').toString().trim();
+    final areaNombrePrincipal = (usuarioData['areaNombre'] ?? '')
+        .toString()
+        .trim();
+    final cargoPrincipal =
+        ((usuarioData['cargo'] ?? '').toString().trim().isNotEmpty
+                ? usuarioData['cargo']
+                : usuarioData['especialidad'])
+            .toString();
+
+    final vinculaciones = <Map<String, dynamic>>[];
+    if (horarioPrincipal.isNotEmpty) {
+      vinculaciones.add(
+        _buildVinculacionAsistencia(
+          tipoVinculacion: _resolverTipoVinculacionDesdeRol(rolPrincipal),
+          rol: rolPrincipal,
+          horarioId: horarioPrincipal,
+          areaId: areaIdPrincipal,
+          areaNombre: areaNombrePrincipal,
+          cargo: cargoPrincipal,
+        ),
+      );
+    }
+
+    final tieneSecundaria =
+        usuarioData['tieneVinculacionAcademicaSecundaria'] == true;
+    final horarioSecundario =
+        (usuarioData['horarioAcademicoSecundarioId'] ?? '')
+            .toString()
+            .trim()
+            .toUpperCase();
+
+    if (tieneSecundaria && horarioSecundario.isNotEmpty) {
+      vinculaciones.add(
+        _buildVinculacionAsistencia(
+          tipoVinculacion: 'academico',
+          rol: UserRoleAccess.roleTeacher,
+          horarioId: horarioSecundario,
+          areaId: (usuarioData['areaAcademicaSecundariaId'] ?? '')
+              .toString()
+              .trim(),
+          areaNombre: (usuarioData['areaAcademicaSecundariaNombre'] ?? '')
+              .toString()
+              .trim(),
+          cargo: (usuarioData['cargoAcademicoSecundario'] ?? '')
+              .toString()
+              .trim(),
+          esSecundaria: true,
+        ),
+      );
+    }
+
+    return vinculaciones;
+  }
+
+  Future<Map<String, dynamic>> _evaluarContextosMarcacion({
+    required DateTime ahora,
+    required bool esEntrada,
+    required List<Map<String, dynamic>> vinculacionesAsistencia,
+    String? sedeId,
+  }) async {
+    final ahoraMin = (ahora.hour * 60) + ahora.minute;
+    final horarioEspecial = sedeId != null && sedeId.trim().isNotEmpty
+        ? await obtenerHorarioEspecialSede(sedeId: sedeId.trim(), fecha: ahora)
+        : null;
+    final horaEntradaEspecial = (horarioEspecial?['horaEntradaEspecial'] ?? '')
+        .toString()
+        .trim();
+    final horaSalidaEspecial = (horarioEspecial?['horaSalidaEspecial'] ?? '')
+        .toString()
+        .trim();
+    final toleranciaSalidaAntesMinutos = _resolverToleranciaHorarioEspecial(
+      horarioEspecial?['toleranciaSalidaAntesMinutos'],
+      _horarioEspecialToleranciaSalidaAntesDefault,
+    );
+    final toleranciaSalidaDespuesMinutos = _resolverToleranciaHorarioEspecial(
+      horarioEspecial?['toleranciaSalidaDespuesMinutos'],
+      _horarioEspecialToleranciaSalidaDespuesDefault,
+    );
+    final salidaEspecialMin = horaSalidaEspecial.isEmpty
+        ? null
+        : _horaEnMinutos(horaSalidaEspecial);
+    final ventanaSalidaEspecialInicio = salidaEspecialMin == null
+        ? null
+        : salidaEspecialMin - toleranciaSalidaAntesMinutos;
+    final ventanaSalidaEspecialFin = salidaEspecialMin == null
+        ? null
+        : salidaEspecialMin + toleranciaSalidaDespuesMinutos;
+    final ventanaSalidaEspecialLabel =
+        ventanaSalidaEspecialInicio == null || ventanaSalidaEspecialFin == null
+        ? ''
+        : '${_minutosAHora(ventanaSalidaEspecialInicio)} a ${_minutosAHora(ventanaSalidaEspecialFin)}';
+
+    final horariosDisponibles = await _obtenerHorariosPorIds(
+      vinculacionesAsistencia
+          .map((v) => (v['horarioId'] ?? '').toString().trim())
+          .where((id) => id.isNotEmpty)
+          .toList(),
+    );
+
+    final horariosEvaluados = <Map<String, dynamic>>[];
+    final contextosActivos = <Map<String, dynamic>>[];
+
+    for (final vinculacion in vinculacionesAsistencia) {
+      final horarioId = (vinculacion['horarioId'] ?? '').toString().trim();
+      if (horarioId.isEmpty) {
+        continue;
+      }
+
+      final data = horariosDisponibles[horarioId];
+      if (data == null) {
+        continue;
+      }
+
+      final entradaBase = data['entrada']?.toString() ?? '00:00';
+      final salidaBase = data['salida']?.toString() ?? '00:00';
+      final entrada = horaEntradaEspecial.isNotEmpty
+          ? horaEntradaEspecial
+          : entradaBase;
+      final salida = horaSalidaEspecial.isNotEmpty
+          ? horaSalidaEspecial
+          : salidaBase;
+      final entradaMin = _horaEnMinutos(entrada);
+      final salidaMin = _horaEnMinutos(salida);
+      final esTiempoCompleto = _esHorarioTiempoCompleto(horarioId, data);
+      final tipoVinculacion = _normalizarTipoVinculacion(
+        vinculacion['tipoVinculacion'],
+      );
+      final referenciaMarcacionMin = esEntrada ? entradaMin : salidaMin;
+      final ventanaNormal = _ventanaMarcacionDesdeReferencia(
+        referenciaMarcacionMin,
+      );
+      final ventanaMarcacionInicio =
+          !esEntrada &&
+              horarioEspecial != null &&
+              ventanaSalidaEspecialInicio != null &&
+              ventanaSalidaEspecialFin != null
+          ? ventanaSalidaEspecialInicio
+          : ventanaNormal.inicio;
+      final ventanaMarcacionFin =
+          !esEntrada &&
+              horarioEspecial != null &&
+              ventanaSalidaEspecialInicio != null &&
+              ventanaSalidaEspecialFin != null
+          ? ventanaSalidaEspecialFin
+          : (esEntrada ? salidaMin : ventanaNormal.fin);
+
+      horariosEvaluados.add({
+        'id': horarioId,
+        'entradaMin': entradaMin,
+        'salidaMin': salidaMin,
+        'rango': '$entrada a $salida',
+        'esTiempoCompleto': esTiempoCompleto,
+        'tipoVinculacion': tipoVinculacion,
+        'ventanaInicioMin': ventanaMarcacionInicio,
+        'ventanaFinMin': ventanaMarcacionFin,
+        'ventana': _etiquetaVentanaMarcacion(
+          ventanaMarcacionInicio,
+          ventanaMarcacionFin,
+        ),
+      });
+
+      final horarioActivo =
+          ahoraMin >= ventanaMarcacionInicio && ahoraMin <= ventanaMarcacionFin;
+
+      if (!horarioActivo) {
+        continue;
+      }
+
+      contextosActivos.add({
+        ...data,
+        'horarioId': horarioId,
+        'tipoVinculacion': tipoVinculacion,
+        'tipoVinculacionLabel': _etiquetaTipoVinculacion(tipoVinculacion),
+        'rolVinculado': (vinculacion['rol'] ?? '').toString().trim(),
+        'cargoVinculado': (vinculacion['cargo'] ?? '').toString().trim(),
+        'areaVinculada': (vinculacion['areaNombre'] ?? '').toString().trim(),
+        'esSecundaria': vinculacion['esSecundaria'] == true,
+        'entrada': entrada,
+        'salida': salida,
+        'entrada_base': entradaBase,
+        'salida_base': salidaBase,
+        'horario_especial_documento_id': horarioEspecial?['documentoId'],
+        'horario_especial_fecha_clave': horarioEspecial?['fechaClave'],
+        'horario_especial_motivo': horarioEspecial?['motivo'],
+        'horario_especial_entrada': horaEntradaEspecial,
+        'horario_especial_salida': horaSalidaEspecial,
+        'horario_especial_ventana_salida': ventanaSalidaEspecialLabel,
+      });
+    }
+
+    return {
+      'activos': contextosActivos,
+      'horariosEvaluados': horariosEvaluados,
+      'horarioEspecial': horarioEspecial,
+      'horaEntradaEspecial': horaEntradaEspecial,
+      'horaSalidaEspecial': horaSalidaEspecial,
+      'toleranciaSalidaAntesMinutos': toleranciaSalidaAntesMinutos,
+      'toleranciaSalidaDespuesMinutos': toleranciaSalidaDespuesMinutos,
+      'ventanaSalidaEspecialInicio': ventanaSalidaEspecialInicio,
+      'ventanaSalidaEspecialFin': ventanaSalidaEspecialFin,
+      'ventanaSalidaEspecialLabel': ventanaSalidaEspecialLabel,
+      'ahoraMin': ahoraMin,
+    };
+  }
+
+  Future<Map<String, dynamic>?> _resolverContextoDesdeUltimaEntrada({
+    required Map<String, dynamic>? ultimoRegistro,
+    required List<Map<String, dynamic>> vinculacionesAsistencia,
+    required Map<String, dynamic>? horarioEspecial,
+    required String horaEntradaEspecial,
+    required String horaSalidaEspecial,
+    required String ventanaSalidaEspecialLabel,
+  }) async {
+    if (ultimoRegistro == null) {
+      return null;
+    }
+
+    final horarioIdUltimo = (ultimoRegistro['horario_id'] ?? '')
+        .toString()
+        .trim()
+        .toUpperCase();
+    final tipoUltimo = _normalizarTipoVinculacion(
+      ultimoRegistro['tipo_vinculacion'],
+    );
+
+    Map<String, dynamic>? vinculacionSeleccionada;
+    for (final vinculacion in vinculacionesAsistencia) {
+      final horarioId = (vinculacion['horarioId'] ?? '').toString().trim();
+      if (horarioId.isEmpty) {
+        continue;
+      }
+
+      final coincideHorario =
+          horarioIdUltimo.isNotEmpty &&
+          horarioId.toUpperCase() == horarioIdUltimo;
+      final coincideTipo =
+          _normalizarTipoVinculacion(vinculacion['tipoVinculacion']) ==
+          tipoUltimo;
+
+      if (coincideHorario && coincideTipo) {
+        vinculacionSeleccionada = vinculacion;
+        break;
+      }
+    }
+
+    if (vinculacionSeleccionada == null &&
+        vinculacionesAsistencia.length == 1 &&
+        horarioIdUltimo.isEmpty) {
+      vinculacionSeleccionada = vinculacionesAsistencia.first;
+    }
+
+    if (vinculacionSeleccionada == null) {
+      return null;
+    }
+
+    final horarioId = (vinculacionSeleccionada['horarioId'] ?? '')
+        .toString()
+        .trim();
+    if (horarioId.isEmpty) {
+      return null;
+    }
+
+    final horariosDisponibles = await _obtenerHorariosPorIds([horarioId]);
+    final data = horariosDisponibles[horarioId];
+    if (data == null) {
+      return null;
+    }
+
+    final entradaBase = data['entrada']?.toString() ?? '00:00';
+    final salidaBase = data['salida']?.toString() ?? '00:00';
+    final entrada = horaEntradaEspecial.isNotEmpty
+        ? horaEntradaEspecial
+        : entradaBase;
+    final salida = horaSalidaEspecial.isNotEmpty ? horaSalidaEspecial : salidaBase;
+    final tipoVinculacion = _normalizarTipoVinculacion(
+      vinculacionSeleccionada['tipoVinculacion'],
+    );
+
+    return {
+      ...data,
+      'horarioId': horarioId,
+      'tipoVinculacion': tipoVinculacion,
+      'tipoVinculacionLabel': _etiquetaTipoVinculacion(tipoVinculacion),
+      'rolVinculado': (vinculacionSeleccionada['rol'] ?? '').toString().trim(),
+      'cargoVinculado': (vinculacionSeleccionada['cargo'] ?? '')
+          .toString()
+          .trim(),
+      'areaVinculada': (vinculacionSeleccionada['areaNombre'] ?? '')
+          .toString()
+          .trim(),
+      'esSecundaria': vinculacionSeleccionada['esSecundaria'] == true,
+      'entrada': entrada,
+      'salida': salida,
+      'entrada_base': entradaBase,
+      'salida_base': salidaBase,
+      'horario_especial_documento_id': horarioEspecial?['documentoId'],
+      'horario_especial_fecha_clave': horarioEspecial?['fechaClave'],
+      'horario_especial_motivo': horarioEspecial?['motivo'],
+      'horario_especial_entrada': horaEntradaEspecial,
+      'horario_especial_salida': horaSalidaEspecial,
+      'horario_especial_ventana_salida': ventanaSalidaEspecialLabel,
+    };
+  }
+
+  Future<List<Map<String, dynamic>>> obtenerContextosMarcacionActivos({
+    required List<Map<String, dynamic>> vinculacionesAsistencia,
+    required bool esEntrada,
+    String? sedeId,
+  }) async {
+    final evaluacion = await _evaluarContextosMarcacion(
+      ahora: DateTime.now(),
+      esEntrada: esEntrada,
+      vinculacionesAsistencia: vinculacionesAsistencia,
+      sedeId: sedeId,
+    );
+
+    return List<Map<String, dynamic>>.from(
+      evaluacion['activos'] as List? ?? const <Map<String, dynamic>>[],
+    );
+  }
+
+  String _catalogoAreasVersion(String sedeId) {
+    if (SedeAccess.normalize(sedeId) == SedeAccess.matrizId) {
+      return 'matriz_fijo_v1';
+    }
+    return 'default_v1';
+  }
+
+  List<Map<String, dynamic>> _defaultAreasForSedeCatalog(String sedeId) {
+    if (SedeAccess.normalize(sedeId) == SedeAccess.matrizId) {
+      return const [
+        {
+          'nombre': 'Secretaria General y Archivo',
+          'requiereGeolocalizacionPorDefecto': true,
+        },
+        {
+          'nombre': 'Unidad Financiera',
+          'requiereGeolocalizacionPorDefecto': true,
+        },
+        {
+          'nombre': 'Unidad de Bienestar y Admisiones',
+          'requiereGeolocalizacionPorDefecto': true,
+        },
+        {
+          'nombre': 'Departamento de Recursos Humanos',
+          'requiereGeolocalizacionPorDefecto': true,
+        },
+        {
+          'nombre': 'Departamento de IT',
+          'requiereGeolocalizacionPorDefecto': true,
+        },
+        {
+          'nombre': 'Coordinador carrera de formacion tecnica',
+          'requiereGeolocalizacionPorDefecto': true,
+        },
+        {
+          'nombre': 'Educacion continua',
+          'requiereGeolocalizacionPorDefecto': true,
+        },
+        {
+          'nombre': 'Coordinador de investigacion',
+          'requiereGeolocalizacionPorDefecto': true,
+        },
+        {
+          'nombre':
+              'Coordinador de vinculacion con la sociedad y Practica Pre Profesionales',
+          'requiereGeolocalizacionPorDefecto': true,
+        },
+      ];
+    }
+
+    return const [
+      {'nombre': 'Administracion', 'requiereGeolocalizacionPorDefecto': true},
+      {'nombre': 'Docencia', 'requiereGeolocalizacionPorDefecto': true},
+      {'nombre': 'Financiero', 'requiereGeolocalizacionPorDefecto': true},
+      {'nombre': 'Marketing', 'requiereGeolocalizacionPorDefecto': false},
+      {'nombre': 'RRHH', 'requiereGeolocalizacionPorDefecto': true},
+    ];
+  }
+
+  Future<void> asegurarAreasBasePersonalSede({required String sedeId}) async {
+    final markerRef = _db
+        .collection('areas')
+        .doc('${sedeId}__seed_marker_${_catalogoAreasVersion(sedeId)}');
+    final marker = await markerRef.get();
+    if (marker.exists) {
+      return;
+    }
+
+    final sedeNombre = SedeAccess.displayNameForId(sedeId);
+    final batch = _db.batch();
+
+    for (final area in _defaultAreasForSedeCatalog(sedeId)) {
+      final nombre = (area['nombre'] ?? '').toString().trim();
+      if (nombre.isEmpty) {
+        continue;
+      }
+
+      final slug = _slugArea(nombre);
+      final ref = _db.collection('areas').doc('${sedeId}_$slug');
+      batch.set(ref, {
+        'nombre': nombre,
+        'nombreNormalizado': _normalizarAreaTexto(nombre),
+        'slug': slug,
+        'activa': true,
+        'requiereGeolocalizacionPorDefecto':
+            area['requiereGeolocalizacionPorDefecto'] == true,
+        'sedeId': sedeId,
+        'sede': sedeNombre,
+        'actualizadoEn': FieldValue.serverTimestamp(),
+        'creadoEn': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    }
+
+    batch.set(markerRef, {
+      'tipo': 'seed_marker',
+      'sedeId': sedeId,
+      'sede': sedeNombre,
+      'actualizadoEn': FieldValue.serverTimestamp(),
+      'creadoEn': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    await batch.commit();
+  }
+
+  Future<void> guardarAreaPersonalSede({
+    String? areaDocId,
+    required String sedeId,
+    required String nombre,
+    required bool requiereGeolocalizacionPorDefecto,
+    bool activa = true,
+  }) async {
+    final nombreLimpio = nombre.trim();
+    if (nombreLimpio.isEmpty) {
+      throw Exception('Ingrese el nombre del area.');
+    }
+
+    final slug = _slugArea(nombreLimpio);
+    final targetId = (areaDocId == null || areaDocId.trim().isEmpty)
+        ? '${sedeId}_$slug'
+        : areaDocId.trim();
+
+    final ref = _db.collection('areas').doc(targetId);
+    final payload = <String, dynamic>{
+      'nombre': nombreLimpio,
+      'nombreNormalizado': _normalizarAreaTexto(nombreLimpio),
+      'slug': slug,
+      'activa': activa,
+      'sedeId': sedeId,
+      'sede': SedeAccess.displayNameForId(sedeId),
+      'actualizadoEn': FieldValue.serverTimestamp(),
+      'creadoEn': FieldValue.serverTimestamp(),
+    };
+    payload.addAll(
+      _buildGpsTemporalPayload(
+        requiereGeolocalizacion: requiereGeolocalizacionPorDefecto,
+        gpsField: 'requiereGeolocalizacionPorDefecto',
+      ),
+    );
+    await ref.set(payload, SetOptions(merge: true));
+  }
+
+  Future<void> eliminarAreaPersonalSede({
+    required String areaDocId,
+    required String sedeId,
+    required String nombre,
+  }) async {
+    final targetId = areaDocId.trim();
+    final nombreLimpio = nombre.trim();
+    if (targetId.isEmpty) {
+      throw Exception('No se encontro el departamento a eliminar.');
+    }
+
+    final usuariosPorId = await _db
+        .collection('usuarios')
+        .where('sedeId', isEqualTo: sedeId)
+        .where('areaId', isEqualTo: targetId)
+        .limit(1)
+        .get();
+    if (usuariosPorId.docs.isNotEmpty) {
+      throw Exception(
+        'No se puede eliminar este departamento porque tiene personal asignado.',
+      );
+    }
+
+    if (nombreLimpio.isNotEmpty) {
+      final usuariosPorNombre = await _db
+          .collection('usuarios')
+          .where('sedeId', isEqualTo: sedeId)
+          .where('areaNombre', isEqualTo: nombreLimpio)
+          .limit(1)
+          .get();
+      if (usuariosPorNombre.docs.isNotEmpty) {
+        throw Exception(
+          'No se puede eliminar este departamento porque tiene personal asignado.',
+        );
+      }
+    }
+
+    await _db.collection('areas').doc(targetId).delete();
+  }
+
+  String _fechaClaveHorarioEspecial(DateTime fecha) {
+    final soloFecha = DateTime(fecha.year, fecha.month, fecha.day);
+    return DateFormat('yyyy-MM-dd').format(soloFecha);
+  }
+
+  String _docIdHorarioEspecial({
+    required String sedeId,
+    required DateTime fecha,
+  }) {
+    return '${sedeId.trim()}_${_fechaClaveHorarioEspecial(fecha)}';
+  }
+
+  bool _horaEspecialValida(String value) {
+    return RegExp(r'^\d{1,2}:\d{2}$').hasMatch(value.trim());
+  }
+
+  Future<void> guardarHorarioEspecialSede({
+    required String sedeId,
+    required DateTime fecha,
+    required String horaEntradaEspecial,
+    required String horaSalidaEspecial,
+    required String motivo,
+    bool activo = true,
+    String? registradoPor,
+    int toleranciaSalidaAntesMinutos =
+        _horarioEspecialToleranciaSalidaAntesDefault,
+    int toleranciaSalidaDespuesMinutos =
+        _horarioEspecialToleranciaSalidaDespuesDefault,
+  }) async {
+    final sedeLimpia = sedeId.trim();
+    final entradaLimpia = _normalizarHoraDesdeTexto(horaEntradaEspecial);
+    final salidaLimpia = _normalizarHoraDesdeTexto(horaSalidaEspecial);
+    final motivoLimpio = motivo.trim();
+
+    if (sedeLimpia.isEmpty) {
+      throw Exception('No se encontro la sede para el horario especial.');
+    }
+    if (!_horaEspecialValida(entradaLimpia)) {
+      throw Exception('Ingrese una hora de entrada valida en formato HH:mm.');
+    }
+    if (!_horaEspecialValida(salidaLimpia)) {
+      throw Exception('Ingrese una hora de salida valida en formato HH:mm.');
+    }
+    if (_horaEnMinutos(salidaLimpia) <= _horaEnMinutos(entradaLimpia)) {
+      throw Exception(
+        'La hora de salida especial debe ser mayor que la hora de entrada.',
+      );
+    }
+    if (motivoLimpio.isEmpty) {
+      throw Exception('Ingrese el motivo del horario especial.');
+    }
+
+    final fechaBase = DateTime(fecha.year, fecha.month, fecha.day);
+    final docId = _docIdHorarioEspecial(sedeId: sedeLimpia, fecha: fechaBase);
+    final ref = _db.collection('horarios_especiales').doc(docId);
+    final existing = await ref.get();
+    final responsable = (registradoPor ?? '').trim();
+
+    final payload = <String, dynamic>{
+      'sedeId': sedeLimpia,
+      'sede': SedeAccess.displayNameForId(sedeLimpia),
+      'fecha': Timestamp.fromDate(fechaBase),
+      'fechaClave': _fechaClaveHorarioEspecial(fechaBase),
+      'horaEntradaEspecial': entradaLimpia,
+      'horaSalidaEspecial': salidaLimpia,
+      'toleranciaSalidaAntesMinutos': toleranciaSalidaAntesMinutos < 0
+          ? _horarioEspecialToleranciaSalidaAntesDefault
+          : toleranciaSalidaAntesMinutos,
+      'toleranciaSalidaDespuesMinutos': toleranciaSalidaDespuesMinutos < 0
+          ? _horarioEspecialToleranciaSalidaDespuesDefault
+          : toleranciaSalidaDespuesMinutos,
+      'motivo': motivoLimpio,
+      'activo': activo,
+      'aplicaATodaLaSede': true,
+      'tipo': 'salida_anticipada_autorizada',
+      'actualizadoEn': FieldValue.serverTimestamp(),
+    };
+
+    if (responsable.isNotEmpty) {
+      payload['actualizadoPor'] = responsable;
+    }
+
+    if (!existing.exists) {
+      payload['creadoEn'] = FieldValue.serverTimestamp();
+      if (responsable.isNotEmpty) {
+        payload['creadoPor'] = responsable;
+      }
+    }
+
+    await ref.set(payload, SetOptions(merge: true));
+  }
+
+  Future<void> actualizarHorarioEspecialSedeEstado({
+    required String docId,
+    required bool activo,
+    String? actualizadoPor,
+  }) async {
+    final targetId = docId.trim();
+    if (targetId.isEmpty) {
+      throw Exception('No se encontro el horario especial a actualizar.');
+    }
+
+    final payload = <String, dynamic>{
+      'activo': activo,
+      'actualizadoEn': FieldValue.serverTimestamp(),
+    };
+    final responsable = (actualizadoPor ?? '').trim();
+    if (responsable.isNotEmpty) {
+      payload['actualizadoPor'] = responsable;
+    }
+
+    await _db
+        .collection('horarios_especiales')
+        .doc(targetId)
+        .set(payload, SetOptions(merge: true));
+  }
+
+  Future<void> eliminarHorarioEspecialSede({required String docId}) async {
+    final targetId = docId.trim();
+    if (targetId.isEmpty) {
+      throw Exception('No se encontro el horario especial a eliminar.');
+    }
+
+    await _db.collection('horarios_especiales').doc(targetId).delete();
+  }
+
+  Future<Map<String, dynamic>?> obtenerHorarioEspecialSede({
+    required String sedeId,
+    required DateTime fecha,
+  }) async {
+    final sedeLimpia = sedeId.trim();
+    if (sedeLimpia.isEmpty) {
+      return null;
+    }
+
+    final docId = _docIdHorarioEspecial(
+      sedeId: sedeLimpia,
+      fecha: DateTime(fecha.year, fecha.month, fecha.day),
+    );
+    final doc = await _db.collection('horarios_especiales').doc(docId).get();
+    if (!doc.exists) {
+      return null;
+    }
+
+    final data = doc.data() as Map<String, dynamic>;
+    if (data['activo'] == false) {
+      return null;
+    }
+
+    return {...data, 'documentoId': doc.id};
+  }
+
   Future<void> guardarUsuarioPersonalSede({
     String? usuarioDocId,
     required String nombre,
     required String correo,
+    String? cedula,
     String? password,
     required String rol,
     required String sedeId,
     String? telefono,
     String? especialidad,
     String? horarioAsignadoId,
+    String? areaId,
+    String? areaNombre,
+    String? cargo,
+    bool? requiereGeolocalizacion,
+    bool tieneVinculacionAcademicaSecundaria = false,
+    String? horarioAcademicoSecundarioId,
+    String? areaAcademicaSecundariaId,
+    String? areaAcademicaSecundariaNombre,
+    String? cargoAcademicoSecundario,
   }) async {
     final nombreLimpio = nombre.trim();
     final correoLimpio = correo.trim().toLowerCase();
+    final cedulaLimpia = (cedula ?? '').trim();
     final passwordLimpio = password?.trim() ?? '';
     final rolLimpio = _resolverRolPersonal(rol);
     final horarioLimpio = (horarioAsignadoId ?? '').trim().toUpperCase();
     final telefonoLimpio = telefono?.trim() ?? '';
     final especialidadLimpia = especialidad?.trim() ?? '';
+    final areaNombreLimpia = areaNombre?.trim() ?? '';
+    final cargoLimpio = cargo?.trim() ?? '';
+    final horarioAcademicoSecundarioLimpio =
+        (horarioAcademicoSecundarioId ?? '').trim().toUpperCase();
+    final areaAcademicaSecundariaIdLimpia = (areaAcademicaSecundariaId ?? '')
+        .trim();
+    final areaAcademicaSecundariaNombreLimpia =
+        (areaAcademicaSecundariaNombre ?? '').trim();
+    final cargoAcademicoSecundarioLimpio = (cargoAcademicoSecundario ?? '')
+        .trim();
     final esNuevo = usuarioDocId == null || usuarioDocId.trim().isEmpty;
 
     if (nombreLimpio.isEmpty) {
@@ -2098,6 +4905,14 @@ class FirebaseService {
 
     if (correoLimpio.isEmpty) {
       throw Exception('Ingrese el correo del colaborador.');
+    }
+
+    if (!RegExp(r'^\d{10}$').hasMatch(cedulaLimpia)) {
+      throw Exception('La cedula debe tener exactamente 10 digitos.');
+    }
+
+    if (!RegExp(r'^\d{10}$').hasMatch(telefonoLimpio)) {
+      throw Exception('El telefono debe tener exactamente 10 digitos.');
     }
 
     if (esNuevo && passwordLimpio.isEmpty) {
@@ -2110,6 +4925,13 @@ class FirebaseService {
 
     if (horarioLimpio.isEmpty) {
       throw Exception('Ingrese el horario asignado.');
+    }
+
+    if (tieneVinculacionAcademicaSecundaria &&
+        horarioAcademicoSecundarioLimpio.isEmpty) {
+      throw Exception(
+        'Ingrese el horario academico secundario del colaborador.',
+      );
     }
 
     final existentes = await _db
@@ -2127,32 +4949,105 @@ class FirebaseService {
 
     final ref = esNuevo
         ? _db.collection('usuarios').doc()
-        : _db.collection('usuarios').doc(usuarioDocId!.trim());
+        : _db.collection('usuarios').doc(usuarioDocId.trim());
 
     final tipoHorario = _resolverTipoHorarioPersonal(
       rol: rolLimpio,
       horarioId: horarioLimpio,
     );
 
+    final areaFinal = areaNombreLimpia.isNotEmpty
+        ? areaNombreLimpia
+        : (especialidadLimpia.isNotEmpty
+              ? especialidadLimpia
+              : _defaultAreaNombreForRole(rolLimpio));
+    final cargoFinal = cargoLimpio.isNotEmpty
+        ? cargoLimpio
+        : (especialidadLimpia.isNotEmpty
+              ? especialidadLimpia
+              : _defaultCargoForRole(rolLimpio));
+    final areaIdLimpia = areaId?.trim() ?? '';
+    final areaIdFinal = areaIdLimpia.isNotEmpty
+        ? areaIdLimpia
+        : '${sedeId}_${_slugArea(areaFinal)}';
+    final requiereGeoFinal = requiereGeolocalizacion ?? true;
+    final tieneSecundariaFinal =
+        UserRoleAccess.isAdministrativeRole(rolLimpio) &&
+        tieneVinculacionAcademicaSecundaria &&
+        horarioAcademicoSecundarioLimpio.isNotEmpty;
+    final areaAcademicaSecundariaNombreFinal =
+        areaAcademicaSecundariaNombreLimpia.isNotEmpty
+        ? areaAcademicaSecundariaNombreLimpia
+        : _defaultAreaNombreForRole(UserRoleAccess.roleTeacher);
+    final areaAcademicaSecundariaIdFinal =
+        areaAcademicaSecundariaIdLimpia.isNotEmpty
+        ? areaAcademicaSecundariaIdLimpia
+        : '${sedeId}_${_slugArea(areaAcademicaSecundariaNombreFinal)}';
+    final cargoAcademicoSecundarioFinal =
+        cargoAcademicoSecundarioLimpio.isNotEmpty
+        ? cargoAcademicoSecundarioLimpio
+        : _defaultCargoForRole(UserRoleAccess.roleTeacher);
+    final vinculacionesAsistencia = <Map<String, dynamic>>[
+      _buildVinculacionAsistencia(
+        tipoVinculacion: _resolverTipoVinculacionDesdeRol(rolLimpio),
+        rol: rolLimpio,
+        horarioId: horarioLimpio,
+        areaId: areaIdFinal,
+        areaNombre: areaFinal,
+        cargo: cargoFinal,
+      ),
+      if (tieneSecundariaFinal)
+        _buildVinculacionAsistencia(
+          tipoVinculacion: 'academico',
+          rol: UserRoleAccess.roleTeacher,
+          horarioId: horarioAcademicoSecundarioLimpio,
+          areaId: areaAcademicaSecundariaIdFinal,
+          areaNombre: areaAcademicaSecundariaNombreFinal,
+          cargo: cargoAcademicoSecundarioFinal,
+          esSecundaria: true,
+        ),
+    ];
+
     final payload = <String, dynamic>{
       'nombre': nombreLimpio,
       'correo': correoLimpio,
+      'cedula': cedulaLimpia,
       'rol': rolLimpio,
       'tipo_horario': tipoHorario,
       'horarios_asignados': [horarioLimpio],
       'telefono': telefonoLimpio,
-      'especialidad': especialidadLimpia.isNotEmpty
-          ? especialidadLimpia
-          : (UserRoleAccess.isAdministrativeRole(rolLimpio) ||
-                    UserRoleAccess.isAdminRole(rolLimpio) ||
-                    UserRoleAccess.isRrhhRole(rolLimpio)
-                ? 'Administracion'
-                : 'Docencia'),
+      'areaId': areaIdFinal,
+      'areaNombre': areaFinal,
+      'cargo': cargoFinal,
+      'especialidad': _buildEspecialidadLegacy(
+        areaNombre: areaFinal,
+        cargo: cargoFinal,
+      ),
       'sede': SedeAccess.displayNameForId(sedeId),
       'sedeId': sedeId,
       'dashboardWeb': sedeId,
+      'tieneVinculacionAcademicaSecundaria': tieneSecundariaFinal,
+      'horarioAcademicoSecundarioId': tieneSecundariaFinal
+          ? horarioAcademicoSecundarioLimpio
+          : FieldValue.delete(),
+      'areaAcademicaSecundariaId': tieneSecundariaFinal
+          ? areaAcademicaSecundariaIdFinal
+          : FieldValue.delete(),
+      'areaAcademicaSecundariaNombre': tieneSecundariaFinal
+          ? areaAcademicaSecundariaNombreFinal
+          : FieldValue.delete(),
+      'cargoAcademicoSecundario': tieneSecundariaFinal
+          ? cargoAcademicoSecundarioFinal
+          : FieldValue.delete(),
+      'vinculacionesAsistencia': vinculacionesAsistencia,
       'actualizadoEn': FieldValue.serverTimestamp(),
     };
+    payload.addAll(
+      _buildGpsTemporalPayload(
+        requiereGeolocalizacion: requiereGeoFinal,
+        gpsField: 'requiereGeolocalizacion',
+      ),
+    );
 
     if (passwordLimpio.isNotEmpty) {
       payload.addAll(await _crearPayloadPasswordSeguro(passwordLimpio));
@@ -2192,7 +5087,7 @@ class FirebaseService {
       return;
     }
 
-    final data = snapshot.data() as Map<String, dynamic>? ?? {};
+    final data = snapshot.data() ?? {};
     final rol = (data['rol'] ?? '').toString().trim().toUpperCase();
     if (rol == 'RRHH') {
       throw Exception(
@@ -2243,21 +5138,53 @@ class FirebaseService {
     }, SetOptions(merge: true));
   }
 
-  Future<List<Solicitud>> obtenerMisSolicitdes(String nombre) async {
+  Future<List<Solicitud>> obtenerMisSolicitdes(
+    String nombre, {
+    String? sedeId,
+  }) async {
     try {
+      await sincronizarNumeracionSolicitudesPorColaborador(
+        nombre: nombre,
+        sedeId: sedeId,
+      );
+
       QuerySnapshot snapshot = await _db
           .collection('solicitudes')
           .where('colaborador', isEqualTo: nombre)
           .get();
 
-      return snapshot.docs
+      final sedeFiltro = SedeAccess.normalize(sedeId);
+      final docs =
+          snapshot.docs.where((doc) {
+            if (sedeFiltro.isEmpty) {
+              return true;
+            }
+            return SedeAccess.matchesSede(
+              doc.data() as Map<String, dynamic>,
+              sedeFiltro,
+            );
+          }).toList()..sort((a, b) {
+            final fechaA = _resolverFechaOrdenSolicitud(
+              a.data() as Map<String, dynamic>,
+            );
+            final fechaB = _resolverFechaOrdenSolicitud(
+              b.data() as Map<String, dynamic>,
+            );
+            final comparacionFecha = fechaB.compareTo(fechaA);
+            if (comparacionFecha != 0) {
+              return comparacionFecha;
+            }
+            return b.id.compareTo(a.id);
+          });
+
+      return docs
           .map(
             (doc) =>
                 Solicitud.fromMap(doc.id, doc.data() as Map<String, dynamic>),
           )
           .toList();
     } catch (e) {
-      print("Error al obtener solicitudes: $e");
+      debugPrint("Error al obtener solicitudes: $e");
       return [];
     }
   }

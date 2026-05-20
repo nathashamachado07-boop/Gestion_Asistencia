@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/foundation.dart';
@@ -37,9 +35,9 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
   bool get _isWebLayout => kIsWeb;
 
   AppBranding get _branding => AppBranding.fromLegacy(
-        isSedeNorte: widget.isSedeNorte,
-        sedeId: widget.sedeId,
-      );
+    isSedeNorte: widget.isSedeNorte,
+    sedeId: widget.sedeId,
+  );
 
   final List<String> _meses = const [
     'Todos',
@@ -142,7 +140,7 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
                 fontSize: 10,
               ),
               headerDecoration: pw.BoxDecoration(
-                color: PdfColor.fromInt(_branding.primary.value),
+                color: PdfColor.fromInt(_branding.primary.toARGB32()),
               ),
               cellStyle: const pw.TextStyle(fontSize: 9),
               cellPadding: const pw.EdgeInsets.all(5),
@@ -187,13 +185,10 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
     }
 
     return Scaffold(
-      backgroundColor:
-          _isWebLayout ? Colors.white : _branding.background,
+      backgroundColor: _isWebLayout ? Colors.white : _branding.background,
       body: Stack(
         children: [
-          Container(
-            color: _isWebLayout ? Colors.white : _branding.background,
-          ),
+          Container(color: _isWebLayout ? Colors.white : _branding.background),
           if (!_isWebLayout)
             Positioned.fill(
               child: LayoutBuilder(
@@ -208,7 +203,8 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
                       final int row = index ~/ cols;
                       final int col = index % cols;
                       final double offsetX = (row % 2 == 0) ? 0 : spacing / 2;
-                      final double left = col * spacing + offsetX - logoSize / 2;
+                      final double left =
+                          col * spacing + offsetX - logoSize / 2;
                       final double top = row * spacing - logoSize / 2;
 
                       return Positioned(
@@ -237,7 +233,8 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
                 opacity: 0.12,
                 child: Image.asset(
                   _branding.logoWatermark,
-                  width: MediaQuery.of(context).size.width *
+                  width:
+                      MediaQuery.of(context).size.width *
                       _branding.mobileWatermarkWidthFactor,
                   fit: BoxFit.contain,
                 ),
@@ -254,11 +251,12 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
-                  borderRadius:
-                      const BorderRadius.vertical(bottom: Radius.circular(35)),
+                  borderRadius: const BorderRadius.vertical(
+                    bottom: Radius.circular(35),
+                  ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
+                      color: Colors.black.withValues(alpha: 0.2),
                       blurRadius: 15,
                       offset: const Offset(0, 5),
                     ),
@@ -269,8 +267,11 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
                     Image.asset(
                       _branding.logoSmall,
                       height: _branding.mobileHeaderLogoHeight,
-                      errorBuilder: (c, e, s) =>
-                          const Icon(Icons.school, size: 40, color: Colors.white),
+                      errorBuilder: (c, e, s) => const Icon(
+                        Icons.school,
+                        size: 40,
+                        color: Colors.white,
+                      ),
                     ),
                     const SizedBox(height: 10),
                     const Text(
@@ -291,7 +292,9 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
                       return Center(
-                        child: CircularProgressIndicator(color: _branding.primary),
+                        child: CircularProgressIndicator(
+                          color: _branding.primary,
+                        ),
                       );
                     }
                     if (snapshot.hasError || !snapshot.hasData) {
@@ -314,7 +317,7 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
                               borderRadius: BorderRadius.circular(15),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withOpacity(0.08),
+                                  color: Colors.black.withValues(alpha: 0.08),
                                   blurRadius: 12,
                                   offset: const Offset(0, 4),
                                 ),
@@ -416,8 +419,9 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
                               ),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: _branding.primary,
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 12),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 12,
+                                ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(15),
                                 ),
@@ -516,7 +520,9 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
                                     style: TextStyle(
                                       fontSize: 14,
                                       height: 1.45,
-                                      color: Colors.black.withOpacity(0.60),
+                                      color: Colors.black.withValues(
+                                        alpha: 0.60,
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -654,10 +660,10 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _branding.primary.withOpacity(0.12)),
+        border: Border.all(color: _branding.primary.withValues(alpha: 0.12)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 12,
             offset: const Offset(0, 6),
           ),
@@ -669,12 +675,7 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
         underline: const SizedBox(),
         borderRadius: BorderRadius.circular(18),
         items: _meses
-            .map(
-              (mes) => DropdownMenuItem(
-                value: mes,
-                child: Text(mes),
-              ),
-            )
+            .map((mes) => DropdownMenuItem(value: mes, child: Text(mes)))
             .toList(),
         onChanged: (value) {
           setState(() {
@@ -694,7 +695,7 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
         borderRadius: BorderRadius.circular(28),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 18,
             offset: const Offset(0, 10),
           ),
@@ -717,7 +718,7 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
             style: TextStyle(
               fontSize: 13,
               height: 1.4,
-              color: Colors.black.withOpacity(0.58),
+              color: Colors.black.withValues(alpha: 0.58),
             ),
           ),
           const SizedBox(height: 22),
@@ -726,16 +727,8 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
             child: PieChart(
               PieChartData(
                 sections: [
-                  _sectionData(
-                    data['Puntual'],
-                    Colors.green,
-                    'Puntual',
-                  ),
-                  _sectionData(
-                    data['Atraso'],
-                    Colors.orange,
-                    'Atraso',
-                  ),
+                  _sectionData(data['Puntual'], Colors.green, 'Puntual'),
+                  _sectionData(data['Atraso'], Colors.orange, 'Atraso'),
                   _sectionData(
                     data['Salida Anticipada'],
                     Colors.redAccent,
@@ -752,16 +745,8 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
             spacing: 10,
             runSpacing: 10,
             children: [
-              _buildLegendChip(
-                'Puntuales',
-                Colors.green,
-                '${data['Puntual']}',
-              ),
-              _buildLegendChip(
-                'Atrasos',
-                Colors.orange,
-                '${data['Atraso']}',
-              ),
+              _buildLegendChip('Puntuales', Colors.green, '${data['Puntual']}'),
+              _buildLegendChip('Atrasos', Colors.orange, '${data['Atraso']}'),
               _buildLegendChip(
                 'Salida anticipada',
                 Colors.redAccent,
@@ -788,7 +773,7 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 16,
             offset: const Offset(0, 8),
           ),
@@ -800,7 +785,7 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
             width: 52,
             height: 52,
             decoration: BoxDecoration(
-              color: color.withOpacity(0.12),
+              color: color.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(16),
             ),
             child: Icon(icono, color: color),
@@ -815,7 +800,7 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    color: Colors.black.withOpacity(0.55),
+                    color: Colors.black.withValues(alpha: 0.55),
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -841,8 +826,10 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
       color: color,
       title: _mostrarGrafica ? '$valor' : '',
       radius: 55,
-      titleStyle:
-          const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+      titleStyle: const TextStyle(
+        color: Colors.white,
+        fontWeight: FontWeight.bold,
+      ),
     );
   }
 
@@ -852,10 +839,10 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -867,26 +854,17 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
           Container(
             width: 12,
             height: 12,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-            ),
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
           ),
           const SizedBox(width: 8),
           Text(
             titulo,
-            style: const TextStyle(
-              fontWeight: FontWeight.w600,
-              fontSize: 12,
-            ),
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
           ),
           const SizedBox(width: 8),
           Text(
             valor,
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.bold,
-            ),
+            style: TextStyle(color: color, fontWeight: FontWeight.bold),
           ),
         ],
       ),
@@ -906,24 +884,23 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
         borderRadius: BorderRadius.circular(30),
         boxShadow: [
           BoxShadow(
-            color: _branding.primary.withOpacity(0.2),
+            color: _branding.primary.withValues(alpha: 0.2),
             blurRadius: 20,
             offset: const Offset(0, 10),
           ),
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, 5),
           ),
         ],
       ),
       child: ListTile(
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
         leading: Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
+            color: color.withValues(alpha: 0.1),
             shape: BoxShape.circle,
           ),
           child: Icon(icono, color: color, size: 24),
@@ -941,7 +918,7 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
           style: TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.bold,
-            color: _branding.primary.withOpacity(0.8),
+            color: _branding.primary.withValues(alpha: 0.8),
           ),
         ),
       ),

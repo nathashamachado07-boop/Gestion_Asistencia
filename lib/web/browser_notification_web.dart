@@ -1,40 +1,47 @@
 import 'dart:async';
-import 'dart:html' as html;
+import 'dart:js_interop';
+import 'dart:js_interop_unsafe';
+
+import 'package:web/web.dart' as web;
+
+bool _notificationSupported() => globalContext.has('Notification');
 
 Future<bool> browserNotificationsSupported() async {
-  return html.Notification.supported;
+  return _notificationSupported();
 }
 
 Future<String> browserNotificationPermission() async {
-  if (!html.Notification.supported) {
+  if (!_notificationSupported()) {
     return 'unsupported';
   }
 
-  return html.Notification.permission ?? 'default';
+  return web.Notification.permission;
 }
 
 Future<String> requestBrowserNotificationPermission() async {
-  if (!html.Notification.supported) {
+  if (!_notificationSupported()) {
     return 'unsupported';
   }
 
-  return await html.Notification.requestPermission();
+  final permission = await web.Notification.requestPermission().toDart;
+  return permission.toDart;
 }
 
-bool showBrowserNotification({
-  required String title,
-  required String body,
-}) {
-  if (!html.Notification.supported ||
-      html.Notification.permission != 'granted') {
+bool showBrowserNotification({required String title, required String body}) {
+  if (!_notificationSupported() || web.Notification.permission != 'granted') {
     return false;
   }
 
-  final notification = html.Notification(title, body: body);
-  notification.onClick.listen((_) {
+  final notification = web.Notification(
+    title,
+    web.NotificationOptions(body: body),
+  );
+  notification.onclick = ((JSAny? _) {
+    notification.close();
+  }).toJS;
+
+  Timer(const Duration(seconds: 6), () {
     notification.close();
   });
-
-  Timer(const Duration(seconds: 6), notification.close);
   return true;
 }

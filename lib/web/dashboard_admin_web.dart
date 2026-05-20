@@ -3,13 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../config/app_config.dart';
+import '../models/app_branding.dart';
+import 'bootstrap_admin_ui.dart';
 
 class DashboardAdminWeb extends StatelessWidget {
   const DashboardAdminWeb({super.key});
 
   static const Color _primary = Color(0xFF467879);
   static const Color _secondary = Color(0xFF6FA1A0);
-  static const Color _primaryDark = Color(0xFF274B4C);
   static const Color _accent = Color(0xFFD8E9E5);
   static const Color _soft = Color(0xFFF3F8F7);
   static const Color _card = Color(0xFFFFFFFF);
@@ -21,53 +22,77 @@ class DashboardAdminWeb extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 28),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildHero(),
-          const SizedBox(height: 24),
-          Wrap(
-            spacing: 18,
-            runSpacing: 18,
-            children: [
-              _buildStatCard(
-                title: 'Personal registrado',
-                icon: Icons.groups_2_outlined,
-                color: _primary,
-                stream: FirebaseFirestore.instance.collection('usuarios').snapshots(),
-                shouldCount: (data) =>
-                    SedeAccess.matchesSede(data, SedeAccess.matrizId) &&
-                    _isTrackedStaff(data),
-              ),
-              _buildAttendanceCard(
-                title: 'Asistencias de hoy',
-                icon: Icons.how_to_reg_outlined,
-                color: _success,
-                countBuilder: (asistencias, nombresPermitidos) {
-                  final hoy = DateTime.now();
-                  return asistencias.where((doc) {
-                    final data = doc.data() as Map<String, dynamic>;
-                    return _belongsToTrackedUser(data, nombresPermitidos) &&
-                        _isSameDay(data['fecha'], hoy);
-                  }).length;
-                },
-              ),
-              _buildAttendanceCard(
-                title: 'Atrasos detectados',
-                icon: Icons.timer_off_outlined,
-                color: _danger,
-                countBuilder: (asistencias, nombresPermitidos) {
-                  return asistencias.where((doc) {
-                    final data = doc.data() as Map<String, dynamic>;
-                    return _belongsToTrackedUser(data, nombresPermitidos) &&
-                        _normalize(data['estado']) == 'atraso';
-                  }).length;
-                },
-              ),
-            ],
+          const SizedBox(height: 28),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final statCardWidth = constraints.maxWidth < 720
+                  ? constraints.maxWidth
+                  : 320.0;
+
+              return Wrap(
+                spacing: 18,
+                runSpacing: 18,
+                children: [
+                  _buildStatCard(
+                    width: statCardWidth,
+                    title: 'Personal registrado',
+                    icon: Icons.groups_2_outlined,
+                    color: _primary,
+                    stream: FirebaseFirestore.instance
+                        .collection('usuarios')
+                        .snapshots(),
+                    shouldCount: (data) =>
+                        SedeAccess.matchesSede(data, SedeAccess.matrizId) &&
+                        _isTrackedStaff(data),
+                  ),
+                  _buildAttendanceCard(
+                    width: statCardWidth,
+                    title: 'Asistencias de hoy',
+                    icon: Icons.how_to_reg_outlined,
+                    color: _success,
+                    countBuilder: (asistencias, nombresPermitidos) {
+                      final hoy = DateTime.now();
+                      return _countUniqueTrackedPeople(
+                        asistencias,
+                        nombresPermitidos,
+                        predicate: (data) => _isSameDay(data['fecha'], hoy),
+                      );
+                    },
+                  ),
+                  _buildAttendanceCard(
+                    width: statCardWidth,
+                    title: 'Atrasos detectados',
+                    icon: Icons.timer_off_outlined,
+                    color: _danger,
+                    countBuilder: (asistencias, nombresPermitidos) {
+                      final hoy = DateTime.now();
+                      return _countUniqueTrackedPeople(
+                        asistencias,
+                        nombresPermitidos,
+                        predicate: (data) =>
+                            _isSameDay(data['fecha'], hoy) &&
+                            _normalize(data['estado']) == 'atraso',
+                      );
+                    },
+                  ),
+                ],
+              );
+            },
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 28),
+          BootstrapAdminSectionHeading(
+            icon: Icons.groups_2_outlined,
+            title: 'Resumen del personal',
+            subtitle:
+                'Vista ejecutiva del personal, la asistencia y las alertas del dia.',
+            accentColor: _primary,
+          ),
+          const SizedBox(height: 16),
           LayoutBuilder(
             builder: (context, constraints) {
               final compacto = constraints.maxWidth < 1100;
@@ -85,13 +110,9 @@ class DashboardAdminWeb extends StatelessWidget {
               return Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: _buildRoleBreakdownPanel(),
-                  ),
+                  Expanded(child: _buildRoleBreakdownPanel()),
                   const SizedBox(width: 18),
-                  Expanded(
-                    child: _buildRecentLatePanel(),
-                  ),
+                  Expanded(child: _buildRecentLatePanel()),
                 ],
               );
             },
@@ -102,81 +123,18 @@ class DashboardAdminWeb extends StatelessWidget {
   }
 
   Widget _buildHero() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(28),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [_primaryDark, _primary, _secondary],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(28),
-        boxShadow: [
-          BoxShadow(
-            color: _primary.withOpacity(0.18),
-            blurRadius: 26,
-            offset: const Offset(0, 14),
-          ),
-        ],
-      ),
-      child: Wrap(
-        alignment: WrapAlignment.start,
-        runSpacing: 18,
-        children: [
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 680),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.14),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: Colors.white24),
-                  ),
-                  child: const Text(
-                    'Matriz activa',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                const Text(
-                  'Panel de control INTESUD',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 34,
-                    fontWeight: FontWeight.w800,
-                    height: 1.05,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'Interfaz institucional personalizada para RRHH. Recursos Humanos esta gestionando la sede principal desde el mismo acceso central.',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.9),
-                    fontSize: 14,
-                    height: 1.5,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+    return BootstrapAdminHero(
+      branding: AppBranding.fromSedeId(SedeAccess.matrizId),
+      icon: Icons.dashboard_customize_rounded,
+      eyebrow: 'Matriz activa',
+      title: 'Panel de control INTESUD',
+      subtitle:
+          'Interfaz institucional para RRHH. Recursos Humanos esta gestionando la sede principal desde un acceso mas claro, rapido y consistente.',
     );
   }
 
   Widget _buildStatCard({
+    required double width,
     required String title,
     required IconData icon,
     required Color color,
@@ -184,10 +142,12 @@ class DashboardAdminWeb extends StatelessWidget {
     bool Function(Map<String, dynamic> data)? shouldCount,
   }) {
     return SizedBox(
-      width: 320,
+      width: width,
       child: StreamBuilder<QuerySnapshot>(
         stream: stream,
         builder: (context, snapshot) {
+          final isLoading =
+              snapshot.connectionState == ConnectionState.waiting;
           final docs = snapshot.data?.docs ?? const [];
           final count = shouldCount == null
               ? docs.length
@@ -196,17 +156,24 @@ class DashboardAdminWeb extends StatelessWidget {
                   return shouldCount(data);
                 }).length;
 
-          return Container(
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
             padding: const EdgeInsets.all(22),
             decoration: BoxDecoration(
               color: _card,
               borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: color.withOpacity(0.12)),
+              border: Border.all(color: color.withValues(alpha: 0.14)),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.04),
-                  blurRadius: 16,
+                  color: color.withValues(alpha: 0.08),
+                  blurRadius: 20,
                   offset: const Offset(0, 8),
+                ),
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.03),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
                 ),
               ],
             ),
@@ -216,8 +183,11 @@ class DashboardAdminWeb extends StatelessWidget {
                   width: 52,
                   height: 52,
                   decoration: BoxDecoration(
-                    color: color.withOpacity(0.12),
+                    color: color.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: color.withValues(alpha: 0.18),
+                    ),
                   ),
                   child: Icon(icon, color: color),
                 ),
@@ -230,22 +200,41 @@ class DashboardAdminWeb extends StatelessWidget {
                         title,
                         style: const TextStyle(
                           color: _muted,
-                          fontSize: 13,
+                          fontSize: 12,
                           fontWeight: FontWeight.w700,
+                          letterSpacing: 0.2,
                         ),
                       ),
                       const SizedBox(height: 6),
-                      Text(
-                        snapshot.connectionState == ConnectionState.waiting
-                            ? '...'
-                            : '$count',
-                        style: const TextStyle(
-                          color: _ink,
-                          fontSize: 28,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
+                      isLoading
+                          ? Container(
+                              width: 60,
+                              height: 28,
+                              decoration: BoxDecoration(
+                                color: _soft,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            )
+                          : Text(
+                              '$count',
+                              style: const TextStyle(
+                                color: _ink,
+                                fontSize: 30,
+                                fontWeight: FontWeight.w800,
+                                height: 1.0,
+                              ),
+                            ),
                     ],
+                  ),
+                ),
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isLoading
+                        ? Colors.grey.shade300
+                        : color.withValues(alpha: 0.60),
                   ),
                 ),
               ],
@@ -257,21 +246,24 @@ class DashboardAdminWeb extends StatelessWidget {
   }
 
   Widget _buildAttendanceCard({
+    required double width,
     required String title,
     required IconData icon,
     required Color color,
     required int Function(
       List<QueryDocumentSnapshot> asistencias,
       Set<String> nombresPermitidos,
-    ) countBuilder,
+    )
+    countBuilder,
   }) {
     return SizedBox(
-      width: 320,
+      width: width,
       child: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance.collection('usuarios').snapshots(),
         builder: (context, usuariosSnapshot) {
-          final nombresPermitidos =
-              _buildAllowedNames(usuariosSnapshot.data?.docs ?? const []);
+          final nombresPermitidos = _buildAllowedNames(
+            usuariosSnapshot.data?.docs ?? const [],
+          );
 
           return StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
@@ -280,21 +272,29 @@ class DashboardAdminWeb extends StatelessWidget {
             builder: (context, asistenciasSnapshot) {
               final asistencias = asistenciasSnapshot.data?.docs ?? const [];
               final count = countBuilder(asistencias, nombresPermitidos);
-              final cargando = usuariosSnapshot.connectionState ==
-                      ConnectionState.waiting ||
-                  asistenciasSnapshot.connectionState == ConnectionState.waiting;
+              final cargando =
+                  usuariosSnapshot.connectionState == ConnectionState.waiting ||
+                  asistenciasSnapshot.connectionState ==
+                      ConnectionState.waiting;
 
-              return Container(
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOut,
                 padding: const EdgeInsets.all(22),
                 decoration: BoxDecoration(
                   color: _card,
                   borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: color.withOpacity(0.12)),
+                  border: Border.all(color: color.withValues(alpha: 0.14)),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.04),
-                      blurRadius: 16,
+                      color: color.withValues(alpha: 0.08),
+                      blurRadius: 20,
                       offset: const Offset(0, 8),
+                    ),
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.03),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
                     ),
                   ],
                 ),
@@ -304,8 +304,11 @@ class DashboardAdminWeb extends StatelessWidget {
                       width: 52,
                       height: 52,
                       decoration: BoxDecoration(
-                        color: color.withOpacity(0.12),
+                        color: color.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: color.withValues(alpha: 0.18),
+                        ),
                       ),
                       child: Icon(icon, color: color),
                     ),
@@ -318,20 +321,41 @@ class DashboardAdminWeb extends StatelessWidget {
                             title,
                             style: const TextStyle(
                               color: _muted,
-                              fontSize: 13,
+                              fontSize: 12,
                               fontWeight: FontWeight.w700,
+                              letterSpacing: 0.2,
                             ),
                           ),
                           const SizedBox(height: 6),
-                          Text(
-                            cargando ? '...' : '$count',
-                            style: const TextStyle(
-                              color: _ink,
-                              fontSize: 28,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
+                          cargando
+                              ? Container(
+                                  width: 60,
+                                  height: 28,
+                                  decoration: BoxDecoration(
+                                    color: _soft,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                )
+                              : Text(
+                                  '$count',
+                                  style: const TextStyle(
+                                    color: _ink,
+                                    fontSize: 30,
+                                    fontWeight: FontWeight.w800,
+                                    height: 1.0,
+                                  ),
+                                ),
                         ],
+                      ),
+                    ),
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: cargando
+                            ? Colors.grey.shade300
+                            : color.withValues(alpha: 0.60),
                       ),
                     ),
                   ],
@@ -367,7 +391,7 @@ class DashboardAdminWeb extends StatelessWidget {
           decoration: BoxDecoration(
             color: _card,
             borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: _accent.withOpacity(0.78)),
+            border: Border.all(color: _accent.withValues(alpha: 0.78)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -426,8 +450,9 @@ class DashboardAdminWeb extends StatelessWidget {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance.collection('usuarios').snapshots(),
       builder: (context, usuariosSnapshot) {
-        final nombresPermitidos =
-            _buildAllowedNames(usuariosSnapshot.data?.docs ?? const []);
+        final nombresPermitidos = _buildAllowedNames(
+          usuariosSnapshot.data?.docs ?? const [],
+        );
 
         return StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance
@@ -435,22 +460,24 @@ class DashboardAdminWeb extends StatelessWidget {
               .snapshots(),
           builder: (context, asistenciasSnapshot) {
             final docs = asistenciasSnapshot.data?.docs ?? const [];
-            final atrasos = docs.where((doc) {
-              final data = doc.data() as Map<String, dynamic>;
-              return _belongsToTrackedUser(data, nombresPermitidos) &&
-                  _normalize(data['estado']) == 'atraso';
-            }).toList()
-              ..sort((a, b) {
-                final fechaA =
-                    ((a.data() as Map<String, dynamic>)['fecha'] as Timestamp?)
-                        ?.toDate();
-                final fechaB =
-                    ((b.data() as Map<String, dynamic>)['fecha'] as Timestamp?)
-                        ?.toDate();
-                return (fechaB ?? DateTime(2000)).compareTo(
-                  fechaA ?? DateTime(2000),
-                );
-              });
+            final atrasos =
+                docs.where((doc) {
+                  final data = doc.data() as Map<String, dynamic>;
+                  return _belongsToTrackedUser(data, nombresPermitidos) &&
+                      _normalize(data['estado']) == 'atraso';
+                }).toList()..sort((a, b) {
+                  final fechaA =
+                      ((a.data() as Map<String, dynamic>)['fecha']
+                              as Timestamp?)
+                          ?.toDate();
+                  final fechaB =
+                      ((b.data() as Map<String, dynamic>)['fecha']
+                              as Timestamp?)
+                          ?.toDate();
+                  return (fechaB ?? DateTime(2000)).compareTo(
+                    fechaA ?? DateTime(2000),
+                  );
+                });
 
             final recientes = atrasos.take(5).toList();
 
@@ -460,7 +487,7 @@ class DashboardAdminWeb extends StatelessWidget {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: _accent.withOpacity(0.45)),
+                border: Border.all(color: _accent.withValues(alpha: 0.45)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -510,7 +537,9 @@ class DashboardAdminWeb extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: _soft,
                           borderRadius: BorderRadius.circular(18),
-                          border: Border.all(color: _accent.withOpacity(0.25)),
+                          border: Border.all(
+                            color: _accent.withValues(alpha: 0.25),
+                          ),
                         ),
                         child: Row(
                           children: [
@@ -518,7 +547,7 @@ class DashboardAdminWeb extends StatelessWidget {
                               width: 42,
                               height: 42,
                               decoration: BoxDecoration(
-                                color: _danger.withOpacity(0.12),
+                                color: _danger.withValues(alpha: 0.12),
                                 borderRadius: BorderRadius.circular(14),
                               ),
                               child: const Icon(
@@ -532,7 +561,8 @@ class DashboardAdminWeb extends StatelessWidget {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    (data['docente'] ?? 'Sin nombre').toString(),
+                                    (data['docente'] ?? 'Sin nombre')
+                                        .toString(),
                                     style: const TextStyle(
                                       color: _ink,
                                       fontWeight: FontWeight.w700,
@@ -582,32 +612,49 @@ class DashboardAdminWeb extends StatelessWidget {
     Color color,
   ) {
     return Container(
-      width: 180,
-      padding: const EdgeInsets.all(16),
+      width: 190,
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: color.withOpacity(0.18)),
+        color: color.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.18)),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.06),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: color, size: 22),
-          const SizedBox(height: 12),
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: color, size: 20),
+          ),
+          const SizedBox(height: 14),
           Text(
             value,
             style: const TextStyle(
               color: _ink,
-              fontSize: 24,
+              fontSize: 26,
               fontWeight: FontWeight.w800,
+              height: 1.0,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 5),
           Text(
             label,
-            style: const TextStyle(
+            style: TextStyle(
               color: _muted,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w600,
+              fontSize: 12.5,
             ),
           ),
         ],
@@ -618,24 +665,67 @@ class DashboardAdminWeb extends StatelessWidget {
   Set<String> _buildAllowedNames(List<QueryDocumentSnapshot> docs) {
     return docs
         .map((doc) => doc.data() as Map<String, dynamic>)
-        .where((data) =>
-            SedeAccess.matchesSede(data, SedeAccess.matrizId) &&
-            _isTrackedStaff(data))
-        .map((data) => (data['nombre'] ?? '').toString().trim())
+        .where(
+          (data) =>
+              SedeAccess.matchesSede(data, SedeAccess.matrizId) &&
+              _isTrackedStaff(data),
+        )
+        .map((data) => _normalizeAttendanceName(data['nombre']))
         .where((nombre) => nombre.isNotEmpty)
         .toSet();
+  }
+
+  int _countUniqueTrackedPeople(
+    List<QueryDocumentSnapshot> asistencias,
+    Set<String> nombresPermitidos, {
+    required bool Function(Map<String, dynamic> data) predicate,
+  }) {
+    final personas = <String>{};
+
+    for (final doc in asistencias) {
+      final data = doc.data() as Map<String, dynamic>;
+      if (!_belongsToTrackedUser(data, nombresPermitidos)) {
+        continue;
+      }
+      if (!predicate(data)) {
+        continue;
+      }
+
+      final nombre = _normalizeAttendanceName(data['docente']);
+      if (nombre.isEmpty) {
+        continue;
+      }
+      personas.add(nombre);
+    }
+
+    return personas.length;
   }
 
   bool _belongsToTrackedUser(
     Map<String, dynamic> data,
     Set<String> nombresPermitidos,
   ) {
-    final nombreMarcacion = (data['docente'] ?? '').toString().trim();
+    final nombreMarcacion = _normalizeAttendanceName(data['docente']);
+    if (nombreMarcacion.isEmpty) {
+      return false;
+    }
+
+    final sedeRegistro = SedeAccess.normalize(data['sedeId']);
+    if (sedeRegistro.isNotEmpty) {
+      return sedeRegistro == SedeAccess.matrizId &&
+          nombresPermitidos.contains(nombreMarcacion);
+    }
+
     return nombresPermitidos.contains(nombreMarcacion);
   }
 
+  String _normalizeAttendanceName(dynamic value) {
+    return value?.toString().trim().toLowerCase() ?? '';
+  }
+
   bool _isTrackedStaff(Map<String, dynamic> data) {
-    return _matchesRole(data, 'Docente') || _matchesRole(data, 'Administrativo');
+    return _matchesRole(data, 'Docente') ||
+        _matchesRole(data, 'Administrativo');
   }
 
   bool _isSameDay(dynamic value, DateTime target) {

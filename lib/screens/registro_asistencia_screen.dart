@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:async';
 import 'package:intl/intl.dart';
@@ -12,17 +12,18 @@ import 'estadisticas_screen.dart';
 import 'notificaciones_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_map_cancellable_tile_provider/flutter_map_cancellable_tile_provider.dart';
 import 'package:latlong2/latlong.dart';
 import 'solicitudes/solicitud_form_screen.dart';
-import 'dart:ui';
 import '../web/browser_notification_stub.dart'
     if (dart.library.html) '../web/browser_notification_web.dart'
-        as browser_notification;
+    as browser_notification;
 
 class RegistroAsistenciaScreen extends StatefulWidget {
   final String nombreDocente;
   final List<dynamic> horariosDocente;
   final String correoUsuario;
+  final String? rolUsuario;
   final bool isSedeNorte;
   final String? sedeId;
 
@@ -31,46 +32,60 @@ class RegistroAsistenciaScreen extends StatefulWidget {
     required this.nombreDocente,
     required this.horariosDocente,
     required this.correoUsuario,
+    this.rolUsuario,
     this.isSedeNorte = false,
     this.sedeId,
   });
 
   @override
-  State<RegistroAsistenciaScreen> createState() => _RegistroAsistenciaScreenState();
+  State<RegistroAsistenciaScreen> createState() =>
+      _RegistroAsistenciaScreenState();
 }
 
 class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
-  
-  static const double latitudInstituto = -0.1843090;
-  static const double longitudInstituto = -78.4909804;
-
   final FirebaseService _service = FirebaseService();
-  int _indiceActual = 0; 
+  final GlobalKey<ScaffoldState> _webPortalScaffoldKey =
+      GlobalKey<ScaffoldState>();
+  int _indiceActual = 0;
   int _pestanaInternaActiva = 0;
 
   late String _horaActual;
   late String _fechaActual;
   Timer? _timer;
   StreamSubscription<QuerySnapshot>? _avisosSubscription;
+  StreamSubscription<QuerySnapshot>? _almuerzoSubscription;
+  StreamSubscription<QuerySnapshot>? _usuarioHorarioSubscription;
   final Set<String> _avisosConocidos = <String>{};
   bool _avisosInicializados = false;
   bool _procesandoEntrada = false;
   bool _procesandoSalida = false;
+  late List<dynamic> _horariosAsignados;
+  List<Map<String, dynamic>> _vinculacionesAsistencia =
+      <Map<String, dynamic>>[];
+  late String _rolUsuario;
+  bool _requiereGeolocalizacion = true;
+  bool _webSidebarCollapsed = false;
+  bool _almuerzoHabilitado = false;
 
-  String _estadoAlmuerzo = "pendiente"; 
+  String _estadoAlmuerzo = "pendiente";
   String _horaAlmuerzoInicio = "--:--";
   String _horaAlmuerzoFin = "--:--";
 
-  final LatLng _ubicacionInstituto = LatLng(latitudInstituto, longitudInstituto);
-  
   Position? _posicionActual;
   AppBranding get _branding => AppBranding.fromLegacy(
-        isSedeNorte: widget.isSedeNorte,
-        sedeId: widget.sedeId,
-      );
+    isSedeNorte: widget.isSedeNorte,
+    sedeId: widget.sedeId,
+  );
+  SedeGeoConfig get _geoConfig => SedeGeoConfig.fromSedeId(_branding.sedeId);
+  LatLng get _ubicacionInstituto =>
+      LatLng(_geoConfig.latitude, _geoConfig.longitude);
   Color get colorInstitucional => _branding.primary;
   Color get colorFondoVariacion => _branding.softAccent;
   bool get _isWebPortal => kIsWeb;
+  double get _webViewportWidth => MediaQuery.sizeOf(context).width;
+  bool get _isPhoneWebLayout => _isWebPortal && _webViewportWidth < 600;
+  bool get _isCompactWebLayout => _isWebPortal && _webViewportWidth < 900;
+  bool get _isNarrowWebLayout => _isWebPortal && _webViewportWidth < 720;
 
   double _webSectionMaxWidth({
     double compact = 760,
@@ -90,10 +105,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
     return compact;
   }
 
-  Widget _wrapWebSection(
-    Widget child, {
-    double? maxWidth,
-  }) {
+  Widget _wrapWebSection(Widget child, {double? maxWidth}) {
     if (!_isWebPortal) {
       return child;
     }
@@ -109,18 +121,254 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
   }
 
   bool _esTiempoCompleto() {
-    return widget.horariosDocente.any((horario) => horario.toString().startsWith("TC"));
+    if (_almuerzoHabilitado) {
+      return true;
+    }
+
+    return _horariosDisponiblesParaAlmuerzo().any(
+      (horario) => horario.toString().trim().toUpperCase().startsWith("TC"),
+    );
   }
 
   bool _esNocturno() {
-    return widget.horariosDocente.any((horario) => horario.toString().startsWith("NOCT"));
+    return _horariosAsignados.any(
+      (horario) => horario.toString().trim().toUpperCase().startsWith("NOCT"),
+    );
+  }
+
+  bool _esHorarioNocturno(String horarioId) {
+    return horarioId.trim().toUpperCase().startsWith('NOCT');
+  }
+
+  List<dynamic> _sanitizarHorarios(List<dynamic> horarios) {
+    return horarios
+        .map((horario) => horario.toString().trim())
+        .where(
+          (horario) =>
+              horario.isNotEmpty &&
+              horario.toLowerCase() != 'sin horario asignado',
+        )
+        .toList();
+  }
+
+  List<dynamic> _horariosDesdeVinculaciones(
+    List<Map<String, dynamic>> vinculaciones,
+  ) {
+    return vinculaciones
+        .map((v) => (v['horarioId'] ?? '').toString().trim())
+        .where((horario) => horario.isNotEmpty)
+        .toSet()
+        .toList();
+  }
+
+  List<dynamic> _horariosDisponiblesParaAlmuerzo() {
+    return {
+      ..._horariosAsignados.map((horario) => horario.toString().trim()),
+      ..._horariosDesdeVinculaciones(
+        _vinculacionesAsistencia,
+      ).map((horario) => horario.toString().trim()),
+    }.where((horario) => horario.isNotEmpty).toList();
+  }
+
+  String _normalizarTipoVinculacion(String? value) {
+    final normalized = value?.trim().toLowerCase() ?? '';
+    return normalized == 'administrativo' ? 'administrativo' : 'academico';
+  }
+
+  String _etiquetaTipoVinculacion(String? value) {
+    return _normalizarTipoVinculacion(value) == 'administrativo'
+        ? UserRoleAccess.roleAdministrative
+        : 'Personal academico';
+  }
+
+  bool _mismosHorarios(List<dynamic> a, List<dynamic> b) {
+    if (a.length != b.length) {
+      return false;
+    }
+
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].toString().trim() != b[i].toString().trim()) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  bool get _debeValidarUbicacion => _requiereGeolocalizacion && !_esNocturno();
+
+  void _aplicarConfiguracionUsuario({
+    required List<dynamic> horarios,
+    required bool requiereGeolocalizacion,
+    required List<Map<String, dynamic>> vinculacionesAsistencia,
+    required String rolUsuario,
+    required bool almuerzoHabilitado,
+  }) {
+    final horariosSinCambios = _mismosHorarios(_horariosAsignados, horarios);
+    final geoSinCambios = _requiereGeolocalizacion == requiereGeolocalizacion;
+    final mismoRol = _rolUsuario == rolUsuario;
+    final mismoAlmuerzo = _almuerzoHabilitado == almuerzoHabilitado;
+    final mismasVinculaciones =
+        _vinculacionesAsistencia.length == vinculacionesAsistencia.length &&
+        _vinculacionesAsistencia.every(
+          (actual) => vinculacionesAsistencia.any(
+            (nuevo) =>
+                (nuevo['horarioId'] ?? '').toString() ==
+                    (actual['horarioId'] ?? '').toString() &&
+                _normalizarTipoVinculacion(
+                      (nuevo['tipoVinculacion'] ?? '').toString(),
+                    ) ==
+                    _normalizarTipoVinculacion(
+                      (actual['tipoVinculacion'] ?? '').toString(),
+                    ),
+          ),
+        );
+
+    if (horariosSinCambios &&
+        geoSinCambios &&
+        mismoRol &&
+        mismoAlmuerzo &&
+        mismasVinculaciones) {
+      _configurarEscuchaAlmuerzo();
+      return;
+    }
+
+    if (!mounted) {
+      _horariosAsignados = horarios;
+      _requiereGeolocalizacion = requiereGeolocalizacion;
+      _vinculacionesAsistencia = vinculacionesAsistencia;
+      _rolUsuario = rolUsuario;
+      _almuerzoHabilitado = almuerzoHabilitado;
+      return;
+    }
+
+    setState(() {
+      _horariosAsignados = horarios;
+      _requiereGeolocalizacion = requiereGeolocalizacion;
+      _vinculacionesAsistencia = vinculacionesAsistencia;
+      _rolUsuario = rolUsuario;
+      _almuerzoHabilitado = almuerzoHabilitado;
+      if (!_almuerzoHabilitado && _pestanaInternaActiva == 1) {
+        _pestanaInternaActiva = 0;
+      }
+    });
+    _configurarEscuchaAlmuerzo();
+
+    if (_debeValidarUbicacion) {
+      unawaited(_obtenerUbicacion());
+    }
+  }
+
+  Future<void> _sincronizarHorariosUsuario() async {
+    try {
+      final usuario = await _service.obtenerUsuarioPorCorreo(
+        widget.correoUsuario,
+      );
+      if (!mounted || usuario == null) {
+        return;
+      }
+
+      final remotos = _sanitizarHorarios(
+        List<dynamic>.from(usuario['horarios_asignados'] as List? ?? const []),
+      );
+      final vinculaciones = _service.resolverVinculacionesAsistenciaUsuario(
+        usuario,
+      );
+      final horariosVinculados = _sanitizarHorarios(
+        _horariosDesdeVinculaciones(vinculaciones),
+      );
+      final requiereGeolocalizacion = _service
+          .requiereGeolocalizacionUsuarioEfectiva(usuario);
+      final almuerzoHabilitado =
+          _service.usuarioTieneAlmuerzoHabilitado(usuario);
+
+      _aplicarConfiguracionUsuario(
+        horarios: remotos.isNotEmpty ? remotos : horariosVinculados,
+        requiereGeolocalizacion: requiereGeolocalizacion,
+        vinculacionesAsistencia: vinculaciones,
+        rolUsuario: (usuario['rol'] ?? _rolUsuario).toString(),
+        almuerzoHabilitado: almuerzoHabilitado,
+      );
+    } catch (e) {
+      debugPrint('No se pudo sincronizar el horario del usuario: $e');
+    }
+  }
+
+  void _escucharHorarioUsuario() {
+    _usuarioHorarioSubscription?.cancel();
+
+    final correoNormalizado = _normalizarCorreo(widget.correoUsuario);
+    if (correoNormalizado.isEmpty) {
+      return;
+    }
+
+    _usuarioHorarioSubscription = FirebaseFirestore.instance
+        .collection('usuarios')
+        .where('correo', isEqualTo: correoNormalizado)
+        .snapshots()
+        .listen((snapshot) {
+          if (!mounted || snapshot.docs.isEmpty) {
+            return;
+          }
+
+          QueryDocumentSnapshot<Map<String, dynamic>>? usuarioDoc;
+          for (final doc in snapshot.docs) {
+            if (SedeAccess.matchesSede(doc.data(), _branding.sedeId)) {
+              usuarioDoc = doc;
+              break;
+            }
+          }
+
+          usuarioDoc ??= snapshot.docs.first;
+          final remotos = _sanitizarHorarios(
+            List<dynamic>.from(
+              usuarioDoc.data()['horarios_asignados'] as List? ?? const [],
+            ),
+          );
+          final vinculaciones = _service.resolverVinculacionesAsistenciaUsuario(
+            usuarioDoc.data(),
+          );
+          final horariosVinculados = _sanitizarHorarios(
+            _horariosDesdeVinculaciones(vinculaciones),
+          );
+          final requiereGeolocalizacion = _service
+              .requiereGeolocalizacionUsuarioEfectiva(usuarioDoc.data());
+          final almuerzoHabilitado = _service.usuarioTieneAlmuerzoHabilitado(
+            usuarioDoc.data(),
+          );
+
+          _aplicarConfiguracionUsuario(
+            horarios: remotos.isNotEmpty ? remotos : horariosVinculados,
+            requiereGeolocalizacion: requiereGeolocalizacion,
+            vinculacionesAsistencia: vinculaciones,
+            rolUsuario: (usuarioDoc.data()['rol'] ?? _rolUsuario).toString(),
+            almuerzoHabilitado: almuerzoHabilitado,
+          );
+        });
+  }
+
+  void _configurarEscuchaAlmuerzo() {
+    _almuerzoSubscription?.cancel();
+
+    if (!_esTiempoCompleto()) {
+      if (mounted) {
+        setState(() {
+          _estadoAlmuerzo = "pendiente";
+          _horaAlmuerzoInicio = "--:--";
+          _horaAlmuerzoFin = "--:--";
+        });
+      }
+      return;
+    }
+
+    _escucharEstadoAlmuerzo();
   }
 
   Future<Map<String, String>> _validarHorarioAlmuerzo() async {
     try {
       final horarioAlmuerzo = await _service.obtenerHorarioAlmuerzoUsuario(
         correo: widget.correoUsuario,
-        listaHorarios: widget.horariosDocente,
+        listaHorarios: _horariosDisponiblesParaAlmuerzo(),
       );
 
       if (horarioAlmuerzo == null) {
@@ -128,7 +376,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
           'permitido': 'false',
           'titulo': 'Horario no disponible',
           'mensaje':
-              'No se encontrÃ³ un horario de almuerzo configurado para su jornada.',
+              'No se encuentra un horario de almuerzo configurado para su jornada.',
         };
       }
 
@@ -144,7 +392,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
           'permitido': 'false',
           'titulo': 'Horario no disponible',
           'mensaje':
-              'No se encontrÃ³ un horario de almuerzo configurado para su jornada.',
+              'No se encuentra un horario de almuerzo configurado para su jornada.',
         };
       }
 
@@ -156,7 +404,8 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
       final horaActualMinutos = ahora.hour * 60 + ahora.minute;
 
       final partesInicio = inicioStr.split(':');
-      final inicioMinutos = int.parse(partesInicio[0]) * 60 + int.parse(partesInicio[1]);
+      final inicioMinutos =
+          int.parse(partesInicio[0]) * 60 + int.parse(partesInicio[1]);
 
       final partesFin = finStr.split(':');
       final finMinutos = int.parse(partesFin[0]) * 60 + int.parse(partesFin[1]);
@@ -166,7 +415,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
           'permitido': 'false',
           'titulo': 'Horario no permitido',
           'mensaje':
-              'Su horario de almuerzo aÃºn no inicia. PodrÃ¡ registrarlo desde las $inicioStr.',
+              'Su horario de almuerzo aun no inicia. Podra¡ registrarlo desde las $inicioStr.',
         };
       }
 
@@ -175,15 +424,11 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
           'permitido': 'false',
           'titulo': 'Horario finalizado',
           'mensaje':
-              'El tiempo asignado para registrar su almuerzo ya terminÃ³. Su horario habilitado era de $inicioStr a $finStr.',
+              'El tiempo asignado para registrar su almuerzo ya terminó. Su horario habilitado era de $inicioStr a $finStr.',
         };
       }
 
-      return {
-        'permitido': 'true',
-        'titulo': '',
-        'mensaje': '',
-      };
+      return {'permitido': 'true', 'titulo': '', 'mensaje': ''};
     } catch (e) {
       debugPrint("Error validando horario: $e");
       return {
@@ -221,6 +466,10 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
   }
 
   Future<bool> _estaEnElInstituto() async {
+    if (!_debeValidarUbicacion) {
+      return true;
+    }
+
     bool servicioActivo = await Geolocator.isLocationServiceEnabled();
     if (!servicioActivo) {
       throw Exception("Activa el GPS del dispositivo.");
@@ -230,12 +479,12 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
     if (permiso == LocationPermission.denied) {
       permiso = await Geolocator.requestPermission();
       if (permiso == LocationPermission.denied) {
-        throw Exception("Permiso de ubicaciÃ³n denegado.");
+        throw Exception("Permiso de ubicación denegado.");
       }
     }
 
     if (permiso == LocationPermission.deniedForever) {
-      throw Exception("Permisos bloqueados. ActÃ­valos desde configuraciÃ³n.");
+      throw Exception("Permisos bloqueados. Actívalos desde configuración.");
     }
 
     const LocationSettings locationSettings = LocationSettings(
@@ -246,28 +495,49 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
     );
 
     double distancia = Geolocator.distanceBetween(
-      latitudInstituto,
-      longitudInstituto,
+      _geoConfig.latitude,
+      _geoConfig.longitude,
       posicion.latitude,
       posicion.longitude,
     );
 
-    if (distancia <= 40) {
+    if (distancia <= _geoConfig.radiusMeters) {
       return true;
     } else {
-      throw Exception("Debes estar dentro del instituto (40 metros).");
+      throw Exception(
+        "Debes estar dentro del instituto (${_geoConfig.radiusMeters.toStringAsFixed(0)} metros).",
+      );
     }
   }
 
   @override
   void initState() {
     super.initState();
+    _horariosAsignados = _sanitizarHorarios(widget.horariosDocente);
+    _rolUsuario = widget.rolUsuario ?? UserRoleAccess.roleTeacher;
+    _vinculacionesAsistencia = _horariosAsignados
+        .map(
+          (horario) => {
+            'tipoVinculacion': UserRoleAccess.isAdministrativeRole(_rolUsuario)
+                ? 'administrativo'
+                : 'academico',
+            'rol': _rolUsuario,
+            'horarioId': horario.toString().trim(),
+            'areaId': '',
+            'areaNombre': '',
+            'cargo': '',
+            'esSecundaria': false,
+          },
+          )
+        .toList();
+    _almuerzoHabilitado = _horariosAsignados.any(
+      (horario) => horario.toString().trim().toUpperCase().startsWith('TC'),
+    );
     _actualizarTiempo();
-    if (!_esNocturno()) {
-      _obtenerUbicacion();
-    }
-    if (_esTiempoCompleto()) _escucharEstadoAlmuerzo();
+    _configurarEscuchaAlmuerzo();
     _escucharAvisosUsuario();
+    _escucharHorarioUsuario();
+    _sincronizarHorariosUsuario();
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (mounted) setState(() => _actualizarTiempo());
     });
@@ -275,21 +545,27 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
 
   void _escucharEstadoAlmuerzo() {
     String hoy = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    FirebaseFirestore.instance
+    _almuerzoSubscription = FirebaseFirestore.instance
         .collection('registros_almuerzo')
         .where('correo_usuario', isEqualTo: widget.correoUsuario)
         .where('fecha', isEqualTo: hoy)
         .snapshots()
         .listen((snapshot) {
-      if (snapshot.docs.isNotEmpty) {
-        var data = snapshot.docs.first.data();
-        setState(() {
-          _estadoAlmuerzo = data['estado'] ?? "pendiente";
-          _horaAlmuerzoInicio = data['hora_salida'] ?? "--:--";
-          _horaAlmuerzoFin = data['hora_regreso'] ?? "--:--";
+          if (snapshot.docs.isNotEmpty) {
+            var data = snapshot.docs.first.data();
+            setState(() {
+              _estadoAlmuerzo = data['estado'] ?? "pendiente";
+              _horaAlmuerzoInicio = data['hora_salida'] ?? "--:--";
+              _horaAlmuerzoFin = data['hora_regreso'] ?? "--:--";
+            });
+          } else if (mounted) {
+            setState(() {
+              _estadoAlmuerzo = "pendiente";
+              _horaAlmuerzoInicio = "--:--";
+              _horaAlmuerzoFin = "--:--";
+            });
+          }
         });
-      }
-    });
   }
 
   void _actualizarTiempo() {
@@ -306,14 +582,17 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
   void dispose() {
     _timer?.cancel();
     _avisosSubscription?.cancel();
+    _almuerzoSubscription?.cancel();
+    _usuarioHorarioSubscription?.cancel();
     super.dispose();
   }
 
   String _normalizarCorreo(String value) => value.trim().toLowerCase();
 
   bool _esAvisoVisibleParaUsuario(Map<String, dynamic> data) {
-    final destinatario =
-        _normalizarCorreo((data['destinatarioCorreo'] ?? '').toString());
+    final destinatario = _normalizarCorreo(
+      (data['destinatarioCorreo'] ?? '').toString(),
+    );
     if (destinatario.isNotEmpty) {
       return destinatario == _normalizarCorreo(widget.correoUsuario);
     }
@@ -350,41 +629,42 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
         .limit(30)
         .snapshots()
         .listen((snapshot) {
-      final visibles = snapshot.docs.where((doc) {
-        final data = doc.data() as Map<String, dynamic>?;
-        if (data == null) {
-          return false;
-        }
-        return _esAvisoVisibleParaUsuario(data) && _esAvisoNotificable(data);
-      }).toList();
+          final visibles = snapshot.docs.where((doc) {
+            final data = doc.data() as Map<String, dynamic>?;
+            if (data == null) {
+              return false;
+            }
+            return _esAvisoVisibleParaUsuario(data) &&
+                _esAvisoNotificable(data);
+          }).toList();
 
-      if (!_avisosInicializados) {
-        _avisosConocidos
-          ..clear()
-          ..addAll(visibles.map((doc) => doc.id));
-        _avisosInicializados = true;
-        return;
-      }
+          if (!_avisosInicializados) {
+            _avisosConocidos
+              ..clear()
+              ..addAll(visibles.map((doc) => doc.id));
+            _avisosInicializados = true;
+            return;
+          }
 
-      for (final change in snapshot.docChanges) {
-        if (change.type != DocumentChangeType.added) {
-          continue;
-        }
+          for (final change in snapshot.docChanges) {
+            if (change.type != DocumentChangeType.added) {
+              continue;
+            }
 
-        final data = change.doc.data() as Map<String, dynamic>?;
-        if (data == null) {
-          continue;
-        }
-        if (!_esAvisoVisibleParaUsuario(data) ||
-            !_esAvisoNotificable(data) ||
-            _avisosConocidos.contains(change.doc.id)) {
-          continue;
-        }
+            final data = change.doc.data();
+            if (data == null) {
+              continue;
+            }
+            if (!_esAvisoVisibleParaUsuario(data) ||
+                !_esAvisoNotificable(data) ||
+                _avisosConocidos.contains(change.doc.id)) {
+              continue;
+            }
 
-        _avisosConocidos.add(change.doc.id);
-        _mostrarNotificacionAviso(data);
-      }
-    });
+            _avisosConocidos.add(change.doc.id);
+            _mostrarNotificacionAviso(data);
+          }
+        });
   }
 
   Future<void> _mostrarNotificacionAviso(Map<String, dynamic> data) async {
@@ -392,12 +672,14 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
 
     final titulo = (data['titulo'] ?? 'Nuevo aviso').toString().trim();
     final mensaje = (data['mensaje'] ?? '').toString().trim();
-    final esAprobacion = (data['tipo'] ?? '').toString().trim().toLowerCase() ==
+    final esAprobacion =
+        (data['tipo'] ?? '').toString().trim().toLowerCase() ==
         'solicitud_aprobada';
     final messenger = ScaffoldMessenger.of(context);
 
     if (kIsWeb) {
-      final permission = await browser_notification.browserNotificationPermission();
+      final permission = await browser_notification
+          .browserNotificationPermission();
       if (permission == 'default') {
         await browser_notification.requestBrowserNotificationPermission();
       }
@@ -419,15 +701,15 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
           content: Container(
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.97),
+              color: Colors.white.withValues(alpha: 0.97),
               borderRadius: BorderRadius.circular(18),
               border: Border.all(
                 color: (esAprobacion ? Colors.green : colorInstitucional)
-                    .withOpacity(0.18),
+                    .withValues(alpha: 0.18),
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.08),
+                  color: Colors.black.withValues(alpha: 0.08),
                   blurRadius: 18,
                   offset: const Offset(0, 8),
                 ),
@@ -443,7 +725,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                     height: 42,
                     decoration: BoxDecoration(
                       color: (esAprobacion ? Colors.green : colorInstitucional)
-                          .withOpacity(0.12),
+                          .withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: Icon(
@@ -503,10 +785,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
             IconButton(
               tooltip: 'Cerrar',
               onPressed: messenger.hideCurrentMaterialBanner,
-              icon: Icon(
-                Icons.close_rounded,
-                color: Colors.grey[600],
-              ),
+              icon: Icon(Icons.close_rounded, color: Colors.grey[600]),
             ),
           ],
         ),
@@ -520,6 +799,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
 
   Future<void> _gestionarAlmuerzo() async {
     try {
+      await _sincronizarHorariosUsuario();
       final validacionHorario = await _validarHorarioAlmuerzo();
       final esHorarioValido =
           (validacionHorario['permitido'] ?? '').toLowerCase() == 'true';
@@ -534,7 +814,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
         return;
       }
 
-      if (!_esNocturno()) {
+      if (_debeValidarUbicacion) {
         bool dentro = await _estaEnElInstituto();
         if (!dentro) return;
       }
@@ -551,11 +831,23 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
   bool _tienePermisoActivo(Map<String, String> res) =>
       (res['permisoActivo'] ?? '').toLowerCase() == 'true';
 
+  bool _esSalidaAnticipadaAutorizada(Map<String, String> res) =>
+      (res['estado'] ?? '').trim() == 'Salida anticipada autorizada';
+
+  bool _esSalidaConRetraso(Map<String, String> res) =>
+      (res['estado'] ?? '').trim() == 'Salida con retraso';
+
   String _tituloDialogoRegistro(bool esEntrada, Map<String, String> res) {
     if (_tienePermisoActivo(res)) {
       return esEntrada
           ? "Entrada registrada con permiso"
           : "Salida registrada con permiso";
+    }
+    if (!esEntrada && _esSalidaAnticipadaAutorizada(res)) {
+      return "Salida registrada con horario especial";
+    }
+    if (!esEntrada && _esSalidaConRetraso(res)) {
+      return "Salida registrada con retraso";
     }
 
     final estado = res['estado'] ?? '';
@@ -573,6 +865,12 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
   Color _colorDialogoRegistro(Map<String, String> res) {
     if (_tienePermisoActivo(res)) {
       return colorInstitucional;
+    }
+    if (_esSalidaAnticipadaAutorizada(res)) {
+      return colorInstitucional;
+    }
+    if (_esSalidaConRetraso(res)) {
+      return Colors.orange;
     }
 
     final estado = res['estado'] ?? '';
@@ -597,6 +895,10 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
     final estadoVisible = _estadoVisibleRegistro(esEntrada, res);
     final permisoHorario = (res['horarioPermiso'] ?? '').trim();
     final motivoPermiso = (res['motivoPermiso'] ?? '').trim();
+    final horarioEspecial = (res['horarioEspecialRango'] ?? '').trim();
+    final ventanaHorarioEspecial = (res['horarioEspecialVentanaSalida'] ?? '')
+        .trim();
+    final motivoHorarioEspecial = (res['motivoHorarioEspecial'] ?? '').trim();
 
     if (_tienePermisoActivo(res)) {
       final accion = esEntrada ? 'entrada' : 'salida';
@@ -624,6 +926,31 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
       return buffer.toString().trim();
     }
 
+    if (!esEntrada && _esSalidaAnticipadaAutorizada(res)) {
+      final buffer = StringBuffer()
+        ..writeln(
+          'Tu salida fue registrada correctamente con un horario especial autorizado para esta sede.',
+        )
+        ..writeln()
+        ..writeln('Bloque asignado: $bloque')
+        ..writeln('Hora registrada: $hora')
+        ..writeln('Estado del registro: $estadoVisible');
+
+      if (horarioEspecial.isNotEmpty) {
+        buffer.writeln('Horario especial aplicado: $horarioEspecial');
+      }
+
+      if (ventanaHorarioEspecial.isNotEmpty) {
+        buffer.writeln('Ventana valida de salida: $ventanaHorarioEspecial');
+      }
+
+      if (motivoHorarioEspecial.isNotEmpty) {
+        buffer.writeln('Motivo institucional: $motivoHorarioEspecial');
+      }
+
+      return buffer.toString().trim();
+    }
+
     if (esEntrada) {
       if ((res['estado'] ?? '') == "A tiempo") {
         return 'Tu entrada fue registrada correctamente dentro del horario asignado.\n\n'
@@ -645,6 +972,13 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
           'Estado del registro: Completada';
     }
 
+    if (_esSalidaConRetraso(res)) {
+      return 'Tu salida fue registrada correctamente, pero quedo fuera de la tolerancia de 10 minutos del horario asignado.\n\n'
+          'Bloque asignado: $bloque\n'
+          'Hora registrada: $hora\n'
+          'Estado del registro: Salida con retraso';
+    }
+
     return 'Tu salida fue registrada antes de la hora oficial del bloque.\n\n'
         'Bloque asignado: $bloque\n'
         'Hora registrada: $hora\n'
@@ -656,21 +990,148 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(titulo, style: TextStyle(color: color, fontWeight: FontWeight.bold)),
+        title: Text(
+          titulo,
+          style: TextStyle(color: color, fontWeight: FontWeight.bold),
+        ),
         content: Text(mensaje),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text("Entendido", style: TextStyle(color: colorInstitucional, fontWeight: FontWeight.bold))
-          )
+            child: Text(
+              "Entendido",
+              style: TextStyle(
+                color: colorInstitucional,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
+  bool _debeValidarUbicacionParaContexto(Map<String, dynamic>? contexto) {
+    if (!_requiereGeolocalizacion) {
+      return false;
+    }
+    if (contexto == null) {
+      return !_esNocturno();
+    }
+    final horarioId = (contexto['horarioId'] ?? '').toString();
+    return !_esHorarioNocturno(horarioId);
+  }
+
+  Future<Map<String, dynamic>?> _mostrarDialogoSeleccionVinculacion(
+    List<Map<String, dynamic>> contextos,
+  ) async {
+    if (!mounted) {
+      return null;
+    }
+
+    return showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Selecciona la jornada a registrar'),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: contextos.map((contexto) {
+              final tipo = _etiquetaTipoVinculacion(
+                (contexto['tipoVinculacion'] ?? '').toString(),
+              );
+              final horario = (contexto['nombre'] ?? 'Horario').toString();
+              final rango =
+                  '${(contexto['entrada'] ?? '--:--').toString()} a ${(contexto['salida'] ?? '--:--').toString()}';
+              final area = (contexto['areaVinculada'] ?? '').toString().trim();
+              final cargo = (contexto['cargoVinculado'] ?? '')
+                  .toString()
+                  .trim();
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.all(14),
+                    alignment: Alignment.centerLeft,
+                    side: BorderSide(
+                      color: colorInstitucional.withValues(alpha: 0.24),
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  onPressed: () => Navigator.pop(ctx, contexto),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        tipo,
+                        style: TextStyle(
+                          color: colorInstitucional,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        horario,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(rango, style: TextStyle(color: Colors.grey[700])),
+                      if (area.isNotEmpty || cargo.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          [
+                            area,
+                            cargo,
+                          ].where((item) => item.trim().isNotEmpty).join(' · '),
+                          style: TextStyle(color: Colors.grey[700]),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<Map<String, dynamic>?> _seleccionarContextoMarcacion(
+    bool esEntrada,
+  ) async {
+    if (_vinculacionesAsistencia.isEmpty) {
+      return null;
+    }
+
+    final contextos = await _service.obtenerContextosMarcacionActivos(
+      vinculacionesAsistencia: _vinculacionesAsistencia,
+      esEntrada: esEntrada,
+      sedeId: _branding.sedeId,
+    );
+
+    if (contextos.length <= 1) {
+      return contextos.isEmpty ? null : contextos.first;
+    }
+
+    return _mostrarDialogoSeleccionVinculacion(contextos);
+  }
+
   Future<void> _ejecutarRegistro(bool esEntrada) async {
-    final bool yaProcesando =
-        esEntrada ? _procesandoEntrada : _procesandoSalida;
+    final bool yaProcesando = esEntrada
+        ? _procesandoEntrada
+        : _procesandoSalida;
     if (yaProcesando) {
       return;
     }
@@ -686,15 +1147,28 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
     }
 
     try {
-      if (!_esNocturno()) {
+      await _sincronizarHorariosUsuario();
+      final contextoSeleccionado = await _seleccionarContextoMarcacion(
+        esEntrada,
+      );
+      if (!mounted) return;
+
+      final requiereResolverHorarioPrimero =
+          _vinculacionesAsistencia.length > 1 && contextoSeleccionado == null;
+
+      if (!requiereResolverHorarioPrimero &&
+          _debeValidarUbicacionParaContexto(contextoSeleccionado)) {
         await _estaEnElInstituto();
       }
+
       final res = await _service.registrarMarcacion(
         nombreUsuario: widget.nombreDocente,
-        listaHorarios: widget.horariosDocente,
+        listaHorarios: _horariosAsignados,
         esEntrada: esEntrada,
         sedeId: _branding.sedeId,
         sedeNombre: _branding.sedeName,
+        vinculacionesAsistencia: _vinculacionesAsistencia,
+        contextoSeleccionado: contextoSeleccionado,
       );
 
       _mostrarAlerta(
@@ -724,25 +1198,25 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
   @override
   Widget build(BuildContext context) {
     final List<Widget> vistas = [
-    _construirCuerpoInicioSelector(),
-    EstadisticasScreen(
-      nombreDocente: widget.nombreDocente,
-      sedeId: _branding.sedeId,
-    ),
-    NotificacionesScreen(
-      correoUsuario: widget.correoUsuario,
-      sedeId: _branding.sedeId,
-    ),
-    SolicitudFormScreen(
-      nombreDocente: widget.nombreDocente,
-      correoUsuario: widget.correoUsuario,
-      sedeId: _branding.sedeId,
-    ),
+      _construirCuerpoInicioSelector(),
+      EstadisticasScreen(
+        nombreDocente: widget.nombreDocente,
+        sedeId: _branding.sedeId,
+      ),
+      NotificacionesScreen(
+        correoUsuario: widget.correoUsuario,
+        sedeId: _branding.sedeId,
+      ),
+      SolicitudFormScreen(
+        nombreDocente: widget.nombreDocente,
+        correoUsuario: widget.correoUsuario,
+        sedeId: _branding.sedeId,
+      ),
       PerfilScreen(
         correoUsuario: widget.correoUsuario,
         sedeId: _branding.sedeId,
       ),
-  ];
+    ];
 
     if (_isWebPortal) {
       return _buildWebPortal(vistas[_indiceActual]);
@@ -757,11 +1231,26 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
         unselectedItemColor: Colors.grey,
         type: BottomNavigationBarType.fixed,
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.assignment_ind_rounded), label: "Asistencia"),
-          BottomNavigationBarItem(icon: Icon(Icons.insert_chart_outlined_rounded), label: "EstadÃ­sticas"),
-          BottomNavigationBarItem(icon: Icon(Icons.notifications_active_outlined), label: "Avisos"),
-          BottomNavigationBarItem(icon: Icon(Icons.description_outlined), label: "Solicitudes"),
-          BottomNavigationBarItem(icon: Icon(Icons.account_circle_outlined), label: "Perfil"),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.assignment_ind_rounded),
+            label: "Asistencia",
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.insert_chart_outlined_rounded),
+            label: "Estadísticas",
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.notifications_active_outlined),
+            label: "Avisos",
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.description_outlined),
+            label: "Solicitudes",
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.account_circle_outlined),
+            label: "Perfil",
+          ),
         ],
       ),
     );
@@ -770,89 +1259,88 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
   // --- MÃ‰TODO MODIFICADO: SOLO EL FONDO CAMBIA ---
   Widget _construirCuerpoInicioSelector() {
     final bool isCentro = _branding.sedeId == AppBranding.sedeCentro.sedeId;
-    final bool showDecorativeBackground = !_isWebPortal;
-    final String tituloAsistencia = _branding.sedeId == AppBranding.sedeNorte.sedeId
+    final String tituloAsistencia =
+        _branding.sedeId == AppBranding.sedeNorte.sedeId
         ? "ASISTENCIA SEDE NORTE"
         : isCentro
-            ? "ASISTENCIA SEDE CENTRO"
-            : _branding.sedeId == AppBranding.sedeCreSer.sedeId
-                ? "ASISTENCIA CRE SER"
-                : "REGISTRO DE ASISTENCIA";
+        ? "ASISTENCIA SEDE CENTRO"
+        : _branding.sedeId == AppBranding.sedeCreSer.sedeId
+        ? "ASISTENCIA CRE SER"
+        : "REGISTRO DE ASISTENCIA";
+
+    if (_isWebPortal) {
+      return _buildWebAttendanceHome(tituloAsistencia);
+    }
 
     return Scaffold(
       body: Stack(
         children: [
           // 1. FONDO BASE
-          Container(
-            color: showDecorativeBackground
-                ? _branding.background
-                : const Color(0xFFF4F7F8),
-          ),
+          Container(color: _branding.background),
 
           // 2. PATRÓN DE FONDO Y MARCA DE AGUA SOLO EN MOVIL
-          if (showDecorativeBackground)
-            Positioned.fill(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final double logoSize = _branding.mobilePatternLogoSize;
-                  const double spacing = 75.0;
-                  final int cols = (constraints.maxWidth / spacing).ceil() + 1;
-                  final int rows = (constraints.maxHeight / spacing).ceil() + 1;
+          Positioned.fill(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final double logoSize = _branding.mobilePatternLogoSize;
+                const double spacing = 75.0;
+                final int cols = (constraints.maxWidth / spacing).ceil() + 1;
+                final int rows = (constraints.maxHeight / spacing).ceil() + 1;
 
-                  return Stack(
-                    children: List.generate(rows * cols, (index) {
-                      final int row = index ~/ cols;
-                      final int col = index % cols;
-                      final double offsetX = (row % 2 == 0) ? 0 : spacing / 2;
-                      final double left = col * spacing + offsetX - logoSize / 2;
-                      final double top = row * spacing - logoSize / 2;
+                return Stack(
+                  children: List.generate(rows * cols, (index) {
+                    final int row = index ~/ cols;
+                    final int col = index % cols;
+                    final double offsetX = (row % 2 == 0) ? 0 : spacing / 2;
+                    final double left = col * spacing + offsetX - logoSize / 2;
+                    final double top = row * spacing - logoSize / 2;
 
-                      return Positioned(
-                        left: left,
-                        top: top,
-                        child: Opacity(
-                          opacity: 0.13,
-                          child: Image.asset(
-                            _branding.logoSmall,
-                            width: logoSize,
-                            height: logoSize,
-                            fit: BoxFit.contain,
-                            color: Colors.white,
-                            colorBlendMode: BlendMode.srcIn,
-                          ),
+                    return Positioned(
+                      left: left,
+                      top: top,
+                      child: Opacity(
+                        opacity: 0.13,
+                        child: Image.asset(
+                          _branding.logoSmall,
+                          width: logoSize,
+                          height: logoSize,
+                          fit: BoxFit.contain,
+                          color: Colors.white,
+                          colorBlendMode: BlendMode.srcIn,
                         ),
-                      );
-                    }),
-                  );
-                },
-              ),
+                      ),
+                    );
+                  }),
+                );
+              },
             ),
+          ),
 
-          if (showDecorativeBackground)
-            Center(
-              child: Opacity(
-                opacity: 0.12,
-                child: ShaderMask(
-                  shaderCallback: (rect) {
-                    return LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        colorInstitucional.withOpacity(0.8),
-                        Colors.transparent,
-                      ],
-                    ).createShader(rect);
-                  },
-                  blendMode: BlendMode.srcATop,
-                  child: Image.asset(
-                    _branding.logoWatermark,
-                    width: MediaQuery.of(context).size.width *
-                        _branding.mobileWatermarkWidthFactor,
-                    fit: BoxFit.contain,
-                  ),
+          Center(
+            child: Opacity(
+              opacity: 0.12,
+              child: ShaderMask(
+                shaderCallback: (rect) {
+                  return LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      colorInstitucional.withValues(alpha: 0.8),
+                      Colors.transparent,
+                    ],
+                  ).createShader(rect);
+                },
+                blendMode: BlendMode.srcATop,
+                child: Image.asset(
+                  _branding.logoWatermark,
+                  width:
+                      MediaQuery.of(context).size.width *
+                      _branding.mobileWatermarkWidthFactor,
+                  fit: BoxFit.contain,
                 ),
               ),
             ),
+          ),
 
           Align(
             alignment: Alignment.topCenter,
@@ -867,20 +1355,26 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                       width: _isWebPortal ? 320 : double.infinity,
                       child: Container(
                         height: 160,
-                        padding: const EdgeInsets.only(top: 50, left: 20, right: 20),
+                        padding: const EdgeInsets.only(
+                          top: 50,
+                          left: 20,
+                          right: 20,
+                        ),
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
                             colors: [colorInstitucional, _branding.primaryDark],
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
                           ),
-                          borderRadius: const BorderRadius.vertical(bottom: Radius.circular(35)),
+                          borderRadius: const BorderRadius.vertical(
+                            bottom: Radius.circular(35),
+                          ),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.2),
+                              color: Colors.black.withValues(alpha: 0.2),
                               blurRadius: 15,
                               offset: const Offset(0, 5),
-                            )
+                            ),
                           ],
                         ),
                         child: Column(
@@ -888,11 +1382,17 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                             Image.asset(
                               _branding.logoSmall,
                               height: _branding.mobileHeaderLogoHeight,
-                              errorBuilder: (c, e, s) => const Icon(Icons.school, size: 40, color: Colors.white),
+                              errorBuilder: (c, e, s) => const Icon(
+                                Icons.school,
+                                size: 40,
+                                color: Colors.white,
+                              ),
                             ),
                             const SizedBox(height: 10),
                             Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                              ),
                               child: Text(
                                 tituloAsistencia,
                                 textAlign: TextAlign.center,
@@ -919,7 +1419,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                       Container(
                         height: _isWebPortal ? 52 : 55,
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.82),
+                          color: Colors.white.withValues(alpha: 0.82),
                           borderRadius: BorderRadius.circular(20),
                           boxShadow: [
                             BoxShadow(
@@ -945,7 +1445,8 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                     child: SingleChildScrollView(
                       physics: const BouncingScrollPhysics(),
                       padding: EdgeInsets.all(_isWebPortal ? 28.0 : 25.0),
-                      child: (_pestanaInternaActiva == 0 || !_esTiempoCompleto())
+                      child:
+                          (_pestanaInternaActiva == 0 || !_esTiempoCompleto())
                           ? _construirContenidoAsistencia()
                           : _construirContenidoAlmuerzoSolo(),
                     ),
@@ -958,6 +1459,257 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
       ),
     );
   }
+
+  Widget _buildWebAttendanceHome(String tituloAsistencia) {
+    final contenido = (_pestanaInternaActiva == 0 || !_esTiempoCompleto())
+        ? _construirContenidoAsistencia()
+        : _construirContenidoAlmuerzoSolo();
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isPhone = constraints.maxWidth < 560;
+        final pagePadding = isPhone ? 14.0 : 28.0;
+
+        return Container(
+          color: const Color(0xFFF4F7F8),
+          child: SingleChildScrollView(
+            primary: true,
+            physics: const AlwaysScrollableScrollPhysics(
+              parent: ClampingScrollPhysics(),
+            ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  pagePadding,
+                  pagePadding,
+                  pagePadding,
+                  isPhone ? 24 : 34,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _wrapWebSection(
+                      _buildWebAttendanceHero(tituloAsistencia),
+                      maxWidth: 1120,
+                    ),
+                    SizedBox(height: isPhone ? 16 : 22),
+                    _wrapWebSection(_buildWebAttendanceTabs(), maxWidth: 560),
+                    SizedBox(height: isPhone ? 16 : 22),
+                    contenido,
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildWebAttendanceHero(String tituloAsistencia) {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(_isPhoneWebLayout ? 18 : 28),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.96),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: colorInstitucional.withValues(alpha: 0.10)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 840;
+          final phone = constraints.maxWidth < 520;
+
+          final info = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Panel de asistencia',
+                style: TextStyle(
+                  color: colorInstitucional,
+                  fontSize: phone ? 12 : 13,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                tituloAsistencia,
+                style: TextStyle(
+                  color: Color(0xFF223334),
+                  fontSize: phone ? 22 : 30,
+                  fontWeight: FontWeight.w800,
+                  height: 1.1,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Registra entradas, salidas y almuerzos desde una vista mas clara para escritorio. El desplazamiento ahora funciona sobre toda la pagina principal.',
+                style: TextStyle(
+                  color: Colors.black.withValues(alpha: 0.62),
+                  fontSize: phone ? 13 : 14,
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 18),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  _buildWebAttendancePill(
+                    Icons.apartment_outlined,
+                    SedeAccess.displayNameForId(_branding.sedeId),
+                  ),
+                  _buildWebAttendancePill(
+                    Icons.schedule_outlined,
+                    _esTiempoCompleto()
+                        ? 'Almuerzo habilitado'
+                        : 'Solo asistencia',
+                  ),
+                ],
+              ),
+            ],
+          );
+
+          final sidePanel = Container(
+            constraints: phone ? null : const BoxConstraints(maxWidth: 300),
+            padding: EdgeInsets.all(phone ? 18 : 22),
+            decoration: BoxDecoration(
+              color: colorInstitucional.withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: colorInstitucional.withValues(alpha: 0.10),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 54,
+                  height: 54,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Image.asset(
+                    _branding.logoSmall,
+                    fit: BoxFit.contain,
+                    errorBuilder: (context, error, stackTrace) =>
+                        Icon(Icons.school_rounded, color: colorInstitucional),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Sesion activa',
+                  style: TextStyle(
+                    color: Colors.black.withValues(alpha: 0.50),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  widget.nombreDocente,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF223334),
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Usa los modulos de asistencia y almuerzo sin cambiar de vista.',
+                  style: TextStyle(
+                    color: Colors.black.withValues(alpha: 0.60),
+                    fontSize: 13,
+                    height: 1.45,
+                  ),
+                ),
+              ],
+            ),
+          );
+
+          if (compact) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [info, const SizedBox(height: 20), sidePanel],
+            );
+          }
+
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: info),
+              const SizedBox(width: 24),
+              sidePanel,
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildWebAttendanceTabs() {
+    return Container(
+      padding: EdgeInsets.all(_isPhoneWebLayout ? 4 : 6),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(_isPhoneWebLayout ? 18 : 20),
+        border: Border.all(color: colorInstitucional.withValues(alpha: 0.08)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          _buildBotonSelector(0, "ASISTENCIA"),
+          if (_esTiempoCompleto()) _buildBotonSelector(1, "ALMUERZO"),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWebAttendancePill(IconData icon, String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: colorInstitucional.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: colorInstitucional),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: TextStyle(
+              color: colorInstitucional,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildBotonSelector(int index, String texto) {
     bool estaActivo = _pestanaInternaActiva == index;
     return Expanded(
@@ -966,17 +1718,19 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 300),
           margin: EdgeInsets.symmetric(
-            horizontal: _isWebPortal ? 5 : 6,
+            horizontal: _isPhoneWebLayout ? 3 : (_isWebPortal ? 5 : 6),
             vertical: 6,
           ),
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: estaActivo ? colorInstitucional : Colors.transparent, 
-            borderRadius: BorderRadius.circular(_isWebPortal ? 16 : 15),
+            color: estaActivo ? colorInstitucional : Colors.transparent,
+            borderRadius: BorderRadius.circular(
+              _isPhoneWebLayout ? 14 : (_isWebPortal ? 16 : 15),
+            ),
             boxShadow: estaActivo
                 ? [
                     BoxShadow(
-                      color: colorInstitucional.withOpacity(0.28),
+                      color: colorInstitucional.withValues(alpha: 0.28),
                       blurRadius: 8,
                       offset: const Offset(0, 3),
                     ),
@@ -984,11 +1738,13 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                 : null,
           ),
           child: Text(
-            texto, 
+            texto,
             style: TextStyle(
-              fontSize: _isWebPortal ? 12 : 11, 
-              fontWeight: FontWeight.bold, 
-              color: estaActivo ? Colors.white : colorInstitucional.withOpacity(0.6)
+              fontSize: _isPhoneWebLayout ? 11 : (_isWebPortal ? 12 : 11),
+              fontWeight: FontWeight.bold,
+              color: estaActivo
+                  ? Colors.white
+                  : colorInstitucional.withValues(alpha: 0.6),
             ),
           ),
         ),
@@ -997,8 +1753,10 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
   }
 
   Widget _buildMapaMini() {
+    final tileProvider = kIsWeb ? CancellableNetworkTileProvider() : null;
+
     final mapCard = Container(
-      height: _isWebPortal ? 230 : 180,
+      height: _isPhoneWebLayout ? 180 : (_isWebPortal ? 230 : 180),
       margin: const EdgeInsets.symmetric(vertical: 15),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(25),
@@ -1025,6 +1783,8 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
               urlTemplate:
                   'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
               subdomains: const ['a', 'b', 'c', 'd'],
+              retinaMode: RetinaMode.isHighDensity(context),
+              tileProvider: tileProvider,
             ),
             MarkerLayer(
               markers: [
@@ -1066,6 +1826,8 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
   }
 
   Widget _construirContenidoAsistencia() {
+    final showStackedActions = _isNarrowWebLayout;
+
     return Column(
       children: [
         _wrapWebSection(
@@ -1077,12 +1839,14 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
           Container(
             padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.85),
+              color: Colors.white.withValues(alpha: 0.85),
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: colorInstitucional.withOpacity(0.1)),
+              border: Border.all(
+                color: colorInstitucional.withValues(alpha: 0.1),
+              ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.02),
+                  color: Colors.black.withValues(alpha: 0.02),
                   blurRadius: 10,
                 ),
               ],
@@ -1092,7 +1856,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: colorInstitucional.withOpacity(0.1),
+                    color: colorInstitucional.withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
@@ -1104,7 +1868,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                 const SizedBox(width: 15),
                 const Expanded(
                   child: Text(
-                    "Tu jornada estÃ¡ activa. Recuerda marcar a tiempo tus ingresos y salidas.",
+                    "Tu jornada está activa. Recuerda marcar a tiempo tus ingresos y salidas.",
                     style: TextStyle(
                       fontSize: 12,
                       color: Colors.black87,
@@ -1121,32 +1885,58 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
         const SizedBox(height: 10),
         if (_isWebPortal)
           _wrapWebSection(
-            Row(
-              children: [
-                Expanded(
-                  child: _botonAsistencia(
-                    titulo: "MARCAR ENTRADA",
-                    subtitulo: "Iniciar registro de hoy",
-                    icon: Icons.login_rounded,
-                    color: colorInstitucional,
-                    procesando: _procesandoEntrada,
-                    onTap: () => _ejecutarRegistro(true),
+            showStackedActions
+                ? Column(
+                    children: [
+                      _botonAsistencia(
+                        titulo: "MARCAR ENTRADA",
+                        subtitulo: "Iniciar registro de hoy",
+                        icon: Icons.login_rounded,
+                        color: colorInstitucional,
+                        procesando: _procesandoEntrada,
+                        onTap: () => _ejecutarRegistro(true),
+                      ),
+                      const SizedBox(height: 14),
+                      _botonAsistencia(
+                        titulo: "MARCAR SALIDA",
+                        subtitulo: "Finalizar labores",
+                        icon: Icons.logout_rounded,
+                        color: const Color(0xFF2C3E50),
+                        procesando: _procesandoSalida,
+                        onTap: () => _ejecutarRegistro(false),
+                      ),
+                    ],
+                  )
+                : Row(
+                    children: [
+                      Expanded(
+                        child: _botonAsistencia(
+                          titulo: "MARCAR ENTRADA",
+                          subtitulo: "Iniciar registro de hoy",
+                          icon: Icons.login_rounded,
+                          color: colorInstitucional,
+                          procesando: _procesandoEntrada,
+                          onTap: () => _ejecutarRegistro(true),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _botonAsistencia(
+                          titulo: "MARCAR SALIDA",
+                          subtitulo: "Finalizar labores",
+                          icon: Icons.logout_rounded,
+                          color: const Color(0xFF2C3E50),
+                          procesando: _procesandoSalida,
+                          onTap: () => _ejecutarRegistro(false),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: _botonAsistencia(
-                    titulo: "MARCAR SALIDA",
-                    subtitulo: "Finalizar labores",
-                    icon: Icons.logout_rounded,
-                    color: const Color(0xFF2C3E50),
-                    procesando: _procesandoSalida,
-                    onTap: () => _ejecutarRegistro(false),
-                  ),
-                ),
-              ],
+            maxWidth: _webSectionMaxWidth(
+              compact: 720,
+              regular: 820,
+              wide: 860,
             ),
-            maxWidth: _webSectionMaxWidth(compact: 720, regular: 820, wide: 860),
           )
         else ...[
           _botonAsistencia(
@@ -1170,10 +1960,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
         const SizedBox(height: 25),
         if (_isWebPortal)
           _wrapWebSection(
-            SizedBox(
-              width: 320,
-              child: _botonHistorial(false),
-            ),
+            SizedBox(width: 320, child: _botonHistorial(false)),
             maxWidth: 320,
           )
         else
@@ -1196,17 +1983,18 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
         if (_isWebPortal)
           _wrapWebSection(
             almuerzoCard,
-            maxWidth: _webSectionMaxWidth(compact: 720, regular: 820, wide: 860),
+            maxWidth: _webSectionMaxWidth(
+              compact: 720,
+              regular: 820,
+              wide: 860,
+            ),
           )
         else
           almuerzoCard,
         const SizedBox(height: 25),
         if (_isWebPortal)
           _wrapWebSection(
-            SizedBox(
-              width: 320,
-              child: _botonHistorial(true),
-            ),
+            SizedBox(width: 320, child: _botonHistorial(true)),
             maxWidth: 320,
           )
         else
@@ -1216,6 +2004,10 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
   }
 
   Widget _buildRelojCard() {
+    final fontSize = _isPhoneWebLayout
+        ? 34.0
+        : (_isCompactWebLayout ? 44.0 : (_isWebPortal ? 54.0 : 40.0));
+
     return Container(
       width: double.infinity,
       padding: EdgeInsets.symmetric(
@@ -1223,31 +2015,37 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
         horizontal: 20,
       ),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.85), 
-        borderRadius: BorderRadius.circular(25), 
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 15, offset: const Offset(0, 4))],
-        border: Border.all(color: colorInstitucional.withOpacity(0.1))
+        color: Colors.white.withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(25),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 15,
+            offset: const Offset(0, 4),
+          ),
+        ],
+        border: Border.all(color: colorInstitucional.withValues(alpha: 0.1)),
       ),
       child: Column(
         children: [
           Text(
-            _horaActual, 
+            _horaActual,
             style: TextStyle(
-              fontSize: _isWebPortal ? 54 : 40,
+              fontSize: fontSize,
               fontWeight: FontWeight.w200,
               color: colorInstitucional,
-              letterSpacing: _isWebPortal ? 4 : 3,
-            )
+              letterSpacing: _isPhoneWebLayout ? 2 : (_isWebPortal ? 4 : 3),
+            ),
           ),
           const SizedBox(height: 5),
           Text(
-            _fechaActual.toUpperCase(), 
+            _fechaActual.toUpperCase(),
             style: TextStyle(
-              fontSize: _isWebPortal ? 13 : 11,
+              fontSize: _isPhoneWebLayout ? 11 : (_isWebPortal ? 13 : 11),
               color: Colors.grey[600],
               fontWeight: FontWeight.bold,
-              letterSpacing: 1.5,
-            )
+              letterSpacing: _isPhoneWebLayout ? 1.1 : 1.5,
+            ),
           ),
         ],
       ),
@@ -1255,6 +2053,17 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
   }
 
   Widget _buildWebPortal(Widget activeView) {
+    final isAttendancePage = _indiceActual == 0;
+
+    if (_isCompactWebLayout ||
+        _webSidebarCollapsed ||
+        _webViewportWidth < 1100) {
+      return _buildResponsiveWebPortal(
+        activeView: activeView,
+        isAttendancePage: isAttendancePage,
+      );
+    }
+
     return Scaffold(
       backgroundColor: const Color(0xFFF4F7F8),
       body: Row(
@@ -1273,7 +2082,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                       height: 96,
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.08),
+                        color: Colors.white.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(18),
                       ),
                       child: Image.asset(
@@ -1281,10 +2090,10 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                         fit: BoxFit.contain,
                         errorBuilder: (context, error, stackTrace) =>
                             const Icon(
-                          Icons.school,
-                          color: Colors.white,
-                          size: 48,
-                        ),
+                              Icons.school,
+                              color: Colors.white,
+                              size: 48,
+                            ),
                       ),
                     ),
                     const SizedBox(height: 18),
@@ -1300,7 +2109,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                     Text(
                       'Portal del usuario',
                       style: TextStyle(
-                        color: Colors.white.withOpacity(0.72),
+                        color: Colors.white.withValues(alpha: 0.72),
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
                       ),
@@ -1310,7 +2119,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                       width: double.infinity,
                       padding: const EdgeInsets.all(13),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.08),
+                        color: Colors.white.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(18),
                         border: Border.all(color: Colors.white10),
                       ),
@@ -1318,9 +2127,9 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Sesion actual',
+                            'Sesión actual',
                             style: TextStyle(
-                              color: Colors.white.withOpacity(0.68),
+                              color: Colors.white.withValues(alpha: 0.68),
                               fontSize: 11,
                               fontWeight: FontWeight.w700,
                             ),
@@ -1340,7 +2149,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                           Text(
                             SedeAccess.displayNameForId(_branding.sedeId),
                             style: TextStyle(
-                              color: Colors.white.withOpacity(0.78),
+                              color: Colors.white.withValues(alpha: 0.78),
                               fontWeight: FontWeight.w600,
                             ),
                           ),
@@ -1389,7 +2198,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                     Text(
                       'v1.0.2 - portal web',
                       style: TextStyle(
-                        color: Colors.white.withOpacity(0.32),
+                        color: Colors.white.withValues(alpha: 0.32),
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
                       ),
@@ -1417,10 +2226,13 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                   ),
                   child: Row(
                     children: [
-                      Icon(
-                        Icons.menu_open_rounded,
-                        color: colorInstitucional,
-                        size: 24,
+                      _buildWebHeaderAction(
+                        icon: Icons.menu_open_rounded,
+                        onTap: () {
+                          setState(() {
+                            _webSidebarCollapsed = true;
+                          });
+                        },
                       ),
                       const SizedBox(width: 14),
                       Text(
@@ -1438,7 +2250,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                           vertical: 9,
                         ),
                         decoration: BoxDecoration(
-                          color: colorInstitucional.withOpacity(0.08),
+                          color: colorInstitucional.withValues(alpha: 0.08),
                           borderRadius: BorderRadius.circular(999),
                         ),
                         child: Row(
@@ -1464,27 +2276,31 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                 ),
                 Expanded(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(18, 18, 22, 22),
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(30),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.06),
-                            blurRadius: 22,
-                            offset: const Offset(0, 10),
+                    padding: isAttendancePage
+                        ? EdgeInsets.zero
+                        : const EdgeInsets.fromLTRB(18, 18, 22, 22),
+                    child: isAttendancePage
+                        ? activeView
+                        : DecoratedBox(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(30),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.06),
+                                  blurRadius: 22,
+                                  offset: const Offset(0, 10),
+                                ),
+                              ],
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.75),
+                                width: 1,
+                              ),
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(30),
+                              child: activeView,
+                            ),
                           ),
-                        ],
-                        border: Border.all(
-                          color: Colors.white.withOpacity(0.75),
-                          width: 1,
-                        ),
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(30),
-                        child: activeView,
-                      ),
-                    ),
                   ),
                 ),
               ],
@@ -1495,24 +2311,461 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
     );
   }
 
+  Widget _buildResponsiveWebPortal({
+    required Widget activeView,
+    required bool isAttendancePage,
+  }) {
+    final isMobileShell = _isCompactWebLayout;
+    final isPhone = _isPhoneWebLayout;
+    final sidebarWidth = isMobileShell ? 0.0 : 96.0;
+
+    final content = isAttendancePage || isMobileShell
+        ? activeView
+        : DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(30),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.06),
+                  blurRadius: 22,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.75),
+                width: 1,
+              ),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(30),
+              child: activeView,
+            ),
+          );
+
+    return Scaffold(
+      key: _webPortalScaffoldKey,
+      backgroundColor: const Color(0xFFF4F7F8),
+      drawer: isMobileShell
+          ? Drawer(
+              width: isPhone ? _webViewportWidth * 0.86 : 320,
+              child: _buildWebSidebar(collapsed: false, isDrawer: true),
+            )
+          : null,
+      body: SafeArea(
+        bottom: false,
+        child: Row(
+          children: [
+            if (!isMobileShell)
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                width: sidebarWidth,
+                color: _branding.primaryDark,
+                child: _buildWebSidebar(collapsed: true, isDrawer: false),
+              ),
+            Expanded(
+              child: Column(
+                children: [
+                  Container(
+                    height: isPhone ? 68 : 74,
+                    padding: EdgeInsets.symmetric(horizontal: isPhone ? 12 : 20),
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Color(0x11000000),
+                          blurRadius: 10,
+                          offset: Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      children: [
+                        _buildWebHeaderAction(
+                          icon: isMobileShell
+                              ? Icons.menu_rounded
+                              : Icons.chevron_right_rounded,
+                          onTap: () {
+                            if (isMobileShell) {
+                              _webPortalScaffoldKey.currentState?.openDrawer();
+                              return;
+                            }
+                            setState(() {
+                              _webSidebarCollapsed = false;
+                            });
+                          },
+                        ),
+                        SizedBox(width: isPhone ? 10 : 14),
+                        Expanded(
+                          child: Text(
+                            _webSectionTitle(),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: const Color(0xFF223334),
+                              fontSize: isPhone ? 16 : 18,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        if (!isPhone)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 9,
+                            ),
+                            decoration: BoxDecoration(
+                              color: colorInstitucional.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.person_outline_rounded,
+                                  color: colorInstitucional,
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 8),
+                                ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    maxWidth: 180,
+                                  ),
+                                  child: Text(
+                                    widget.nombreDocente,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: colorInstitucional,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: Padding(
+                      padding: isAttendancePage || isMobileShell
+                          ? EdgeInsets.zero
+                          : const EdgeInsets.fromLTRB(18, 18, 22, 22),
+                      child: content,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWebSidebar({
+    required bool collapsed,
+    required bool isDrawer,
+  }) {
+    final initial = widget.nombreDocente.trim().isEmpty
+        ? 'U'
+        : widget.nombreDocente.trim()[0].toUpperCase();
+
+    return ColoredBox(
+      color: _branding.primaryDark,
+      child: SafeArea(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            collapsed ? 12 : 16,
+            18,
+            collapsed ? 12 : 16,
+            16,
+          ),
+          child: Column(
+            crossAxisAlignment: collapsed
+                ? CrossAxisAlignment.center
+                : CrossAxisAlignment.start,
+            children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: collapsed
+                      ? Container(
+                          width: 60,
+                          height: 60,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          child: Image.asset(
+                            _branding.logoSmall,
+                            fit: BoxFit.contain,
+                            errorBuilder: (context, error, stackTrace) =>
+                                const Icon(
+                                  Icons.school,
+                                  color: Colors.white,
+                                  size: 30,
+                                ),
+                          ),
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 96,
+                              height: 96,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                              child: Image.asset(
+                                _branding.logoSmall,
+                                fit: BoxFit.contain,
+                                errorBuilder: (context, error, stackTrace) =>
+                                    const Icon(
+                                      Icons.school,
+                                      color: Colors.white,
+                                      size: 48,
+                                    ),
+                              ),
+                            ),
+                            const SizedBox(height: 18),
+                            const Text(
+                              'INTESUD',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.6,
+                              ),
+                            ),
+                            Text(
+                              'Portal del usuario',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.72),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: _buildWebSidebarIconButton(
+                    icon: isDrawer
+                        ? Icons.close_rounded
+                        : (collapsed
+                              ? Icons.chevron_right_rounded
+                              : Icons.chevron_left_rounded),
+                    onTap: () {
+                      if (isDrawer) {
+                        Navigator.of(context).pop();
+                        return;
+                      }
+                      setState(() {
+                        _webSidebarCollapsed = !collapsed;
+                      });
+                    },
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: collapsed ? 14 : 18),
+            Container(
+              width: double.infinity,
+              padding: EdgeInsets.all(collapsed ? 10 : 13),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: Colors.white10),
+              ),
+              child: collapsed
+                  ? Column(
+                      children: [
+                        const Icon(
+                          Icons.person_outline_rounded,
+                          color: Colors.white,
+                          size: 26,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          initial,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Sesion actual',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.68),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          widget.nombreDocente,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          SedeAccess.displayNameForId(_branding.sedeId),
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.78),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
+            const SizedBox(height: 18),
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    _buildWebNavItem(
+                      index: 0,
+                      icon: Icons.assignment_ind_rounded,
+                      label: 'Asistencia',
+                      collapsed: collapsed,
+                      onTap: isDrawer ? () => Navigator.of(context).pop() : null,
+                    ),
+                    const SizedBox(height: 10),
+                    _buildWebNavItem(
+                      index: 1,
+                      icon: Icons.insert_chart_outlined_rounded,
+                      label: 'Estadisticas',
+                      collapsed: collapsed,
+                      onTap: isDrawer ? () => Navigator.of(context).pop() : null,
+                    ),
+                    const SizedBox(height: 10),
+                    _buildWebNavItem(
+                      index: 2,
+                      icon: Icons.notifications_active_outlined,
+                      label: 'Avisos',
+                      collapsed: collapsed,
+                      onTap: isDrawer ? () => Navigator.of(context).pop() : null,
+                    ),
+                    const SizedBox(height: 10),
+                    _buildWebNavItem(
+                      index: 3,
+                      icon: Icons.description_outlined,
+                      label: 'Solicitudes',
+                      collapsed: collapsed,
+                      onTap: isDrawer ? () => Navigator.of(context).pop() : null,
+                    ),
+                    const SizedBox(height: 10),
+                    _buildWebNavItem(
+                      index: 4,
+                      icon: Icons.account_circle_outlined,
+                      label: 'Perfil',
+                      collapsed: collapsed,
+                      onTap: isDrawer ? () => Navigator.of(context).pop() : null,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            if (!collapsed)
+              Text(
+                'v1.0.2 - portal web',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.32),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWebHeaderAction({
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: onTap,
+      child: Container(
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(
+          color: colorInstitucional.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Icon(icon, color: colorInstitucional, size: 22),
+      ),
+    );
+  }
+
+  Widget _buildWebSidebarIconButton({
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: onTap,
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Icon(icon, color: Colors.white, size: 22),
+      ),
+    );
+  }
+
   Widget _buildWebNavItem({
     required int index,
     required IconData icon,
     required String label,
+    bool collapsed = false,
+    VoidCallback? onTap,
   }) {
     final isActive = _indiceActual == index;
 
     return InkWell(
       borderRadius: BorderRadius.circular(18),
-      onTap: () => setState(() => _indiceActual = index),
+      onTap: () {
+        setState(() => _indiceActual = index);
+        onTap?.call();
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 220),
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        padding: EdgeInsets.symmetric(
+          horizontal: collapsed ? 10 : 14,
+          vertical: 12,
+        ),
         decoration: BoxDecoration(
-          color: isActive ? Colors.white : Colors.white.withOpacity(0.08),
+          color: isActive ? Colors.white : Colors.white.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.white.withOpacity(isActive ? 0.0 : 0.06)),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: isActive ? 0.0 : 0.06),
+          ),
         ),
         child: Row(
           children: [
@@ -1521,8 +2774,8 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
               height: 38,
               decoration: BoxDecoration(
                 color: isActive
-                    ? colorInstitucional.withOpacity(0.12)
-                    : Colors.white.withOpacity(0.10),
+                    ? colorInstitucional.withValues(alpha: 0.12)
+                    : Colors.white.withValues(alpha: 0.10),
                 borderRadius: BorderRadius.circular(14),
               ),
               child: Icon(
@@ -1531,24 +2784,26 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                 color: isActive ? colorInstitucional : Colors.white,
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                label,
-                style: TextStyle(
-                  color: isActive ? colorInstitucional : Colors.white,
-                  fontWeight: isActive ? FontWeight.w800 : FontWeight.w600,
-                  fontSize: 13,
+            if (!collapsed) ...[
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    color: isActive ? colorInstitucional : Colors.white,
+                    fontWeight: isActive ? FontWeight.w800 : FontWeight.w600,
+                    fontSize: 13,
+                  ),
                 ),
               ),
-            ),
-            Icon(
-              Icons.chevron_right_rounded,
-              color: isActive
-                  ? colorInstitucional.withOpacity(0.90)
-                  : Colors.white.withOpacity(0.55),
-              size: 22,
-            ),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: isActive
+                    ? colorInstitucional.withValues(alpha: 0.90)
+                    : Colors.white.withValues(alpha: 0.55),
+                size: 22,
+              ),
+            ],
           ],
         ),
       ),
@@ -1578,20 +2833,39 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(30),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.85), 
-        borderRadius: BorderRadius.circular(30), 
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 20)], 
-        border: Border.all(color: colorInstitucional.withOpacity(0.08))
+        color: Colors.white.withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(30),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 20,
+          ),
+        ],
+        border: Border.all(color: colorInstitucional.withValues(alpha: 0.08)),
       ),
       child: Column(
         children: [
           Container(
             padding: const EdgeInsets.all(15),
-            decoration: BoxDecoration(color: colorInstitucional.withOpacity(0.1), shape: BoxShape.circle),
-            child: Icon(Icons.restaurant_rounded, color: colorInstitucional, size: 35),
+            decoration: BoxDecoration(
+              color: colorInstitucional.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.restaurant_rounded,
+              color: colorInstitucional,
+              size: 35,
+            ),
           ),
           const SizedBox(height: 20),
-          const Text("JORNADA DE ALMUERZO", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, letterSpacing: 1)),
+          const Text(
+            "JORNADA DE ALMUERZO",
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 16,
+              letterSpacing: 1,
+            ),
+          ),
           const SizedBox(height: 10),
           const Text(
             "Gestione sus tiempos de descanso conforme a su horario asignado.",
@@ -1599,11 +2873,21 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
             style: TextStyle(color: Colors.grey, fontSize: 12, height: 1.5),
           ),
           const SizedBox(height: 25),
-          if (_horaAlmuerzoInicio != "--:--") 
+          if (_horaAlmuerzoInicio != "--:--")
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
-              decoration: BoxDecoration(color: Colors.black.withOpacity(0.05), borderRadius: BorderRadius.circular(10)),
-              child: Text("Salida: $_horaAlmuerzoInicio  â€¢  Regreso: $_horaAlmuerzoFin", style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.w600, fontSize: 12)),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                "Salida: $_horaAlmuerzoInicio  â€¢  Regreso: $_horaAlmuerzoFin",
+                style: const TextStyle(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12,
+                ),
+              ),
             ),
           const SizedBox(height: 20),
           if (finalizado)
@@ -1612,7 +2896,14 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
               children: [
                 Icon(Icons.check_circle, color: Colors.green, size: 18),
                 SizedBox(width: 8),
-                Text("Almuerzo registrado correctamente", style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 13)),
+                Text(
+                  "Almuerzo registrado correctamente",
+                  style: TextStyle(
+                    color: Colors.green,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                ),
               ],
             )
           else
@@ -1621,14 +2912,21 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
               child: ElevatedButton(
                 onPressed: _gestionarAlmuerzo,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: enCurso ? Colors.redAccent : Colors.orange[700], 
+                  backgroundColor: enCurso
+                      ? Colors.redAccent
+                      : Colors.orange[700],
                   elevation: 4,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                  padding: const EdgeInsets.symmetric(vertical: 16)
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
                 ),
                 child: Text(
                   enCurso ? "FINALIZAR ALMUERZO" : "INICIAR ALMUERZO",
-                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
                 ),
               ),
             ),
@@ -1653,12 +2951,19 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
           ),
         ),
         icon: const Icon(Icons.history_rounded),
-        label: Text(esAlmuerzo ? "HISTORIAL DE ALMUERZOS" : "HISTORIAL DE REGISTROS"),
+        label: Text(
+          esAlmuerzo ? "HISTORIAL DE ALMUERZOS" : "HISTORIAL DE REGISTROS",
+        ),
         style: OutlinedButton.styleFrom(
-          foregroundColor: colorInstitucional, 
-          side: BorderSide(color: colorInstitucional.withOpacity(0.4), width: 1.5), 
+          foregroundColor: colorInstitucional,
+          side: BorderSide(
+            color: colorInstitucional.withValues(alpha: 0.4),
+            width: 1.5,
+          ),
           padding: const EdgeInsets.symmetric(vertical: 14),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18))
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
         ),
       ),
     );
@@ -1682,20 +2987,20 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
           padding: EdgeInsets.all(_isWebPortal ? 18 : 20),
           decoration: BoxDecoration(
             color: procesando
-                ? color.withOpacity(0.10)
-                : Colors.white.withOpacity(0.9),
+                ? color.withValues(alpha: 0.10)
+                : Colors.white.withValues(alpha: 0.9),
             borderRadius: BorderRadius.circular(_isWebPortal ? 22 : 25),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: Colors.black.withValues(alpha: 0.05),
                 blurRadius: 12,
                 offset: const Offset(0, 4),
               ),
             ],
             border: Border.all(
               color: procesando
-                  ? color.withOpacity(0.30)
-                  : color.withOpacity(0.1),
+                  ? color.withValues(alpha: 0.30)
+                  : color.withValues(alpha: 0.1),
               width: procesando ? 1.6 : 1,
             ),
           ),
@@ -1705,7 +3010,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                 duration: const Duration(milliseconds: 220),
                 padding: EdgeInsets.all(_isWebPortal ? 11 : 12),
                 decoration: BoxDecoration(
-                  color: color.withOpacity(procesando ? 0.18 : 0.1),
+                  color: color.withValues(alpha: procesando ? 0.18 : 0.1),
                   borderRadius: BorderRadius.circular(15),
                 ),
                 child: procesando
@@ -1763,5 +3068,3 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
     );
   }
 }
-
-

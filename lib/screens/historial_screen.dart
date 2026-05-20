@@ -19,10 +19,8 @@ class HistorialScreen extends StatelessWidget {
   final bool isSedeNorte;
   final String? sedeId;
 
-  AppBranding get _branding => AppBranding.fromLegacy(
-        isSedeNorte: isSedeNorte,
-        sedeId: sedeId,
-      );
+  AppBranding get _branding =>
+      AppBranding.fromLegacy(isSedeNorte: isSedeNorte, sedeId: sedeId);
 
   void _mostrarDetalle(BuildContext context, Map<String, dynamic> reg) {
     showDialog(
@@ -57,17 +55,15 @@ class HistorialScreen extends StatelessWidget {
               _itemDetalle('Regreso:', reg['hora_regreso']),
             _itemDetalle(
               'Referencia:',
-              reg['horario_ref'] ?? (esAlmuerzo ? 'Jornada Almuerzo' : 'General'),
+              reg['horario_ref'] ??
+                  (esAlmuerzo ? 'Jornada Almuerzo' : 'General'),
             ),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text(
-              'Cerrar',
-              style: TextStyle(color: _branding.primary),
-            ),
+            child: Text('Cerrar', style: TextStyle(color: _branding.primary)),
           ),
         ],
       ),
@@ -142,7 +138,8 @@ class HistorialScreen extends StatelessWidget {
               final esEntrada = tipoRegistro == 'ENTRADA';
               final estadoTexto = (reg['estado'] ?? '').toString();
               final estadoNormalizado = estadoTexto.toLowerCase();
-              final esEstadoPositivo = estadoNormalizado == 'a tiempo' ||
+              final esEstadoPositivo =
+                  estadoNormalizado == 'a tiempo' ||
                   estadoNormalizado == 'completada' ||
                   estadoNormalizado == 'finalizado';
 
@@ -158,8 +155,8 @@ class HistorialScreen extends StatelessWidget {
                     esAlmuerzo
                         ? Icons.restaurant_rounded
                         : (esEntrada
-                            ? Icons.login_rounded
-                            : Icons.logout_rounded),
+                              ? Icons.login_rounded
+                              : Icons.logout_rounded),
                     color: _branding.primary,
                   ),
                   title: Text(
@@ -170,9 +167,7 @@ class HistorialScreen extends StatelessWidget {
                     ),
                   ),
                   subtitle: Text(
-                    esAlmuerzo
-                        ? 'Salida: $horaMostrar'
-                        : 'Hora: $horaMostrar',
+                    esAlmuerzo ? 'Salida: $horaMostrar' : 'Hora: $horaMostrar',
                   ),
                   trailing: Container(
                     padding: const EdgeInsets.symmetric(
@@ -181,16 +176,14 @@ class HistorialScreen extends StatelessWidget {
                     ),
                     decoration: BoxDecoration(
                       color: esEstadoPositivo
-                          ? Colors.green.withOpacity(0.1)
-                          : Colors.orange.withOpacity(0.1),
+                          ? Colors.green.withValues(alpha: 0.1)
+                          : Colors.orange.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
                       estadoTexto.toUpperCase(),
                       style: TextStyle(
-                        color: esEstadoPositivo
-                            ? Colors.green
-                            : Colors.orange,
+                        color: esEstadoPositivo ? Colors.green : Colors.orange,
                         fontWeight: FontWeight.bold,
                         fontSize: 10,
                       ),

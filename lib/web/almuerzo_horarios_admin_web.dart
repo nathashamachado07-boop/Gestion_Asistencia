@@ -1,9 +1,12 @@
+import 'dart:math' as math;
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../config/app_config.dart';
 import '../models/app_branding.dart';
 import '../services/firebase_service.dart';
+import 'bootstrap_admin_ui.dart';
 
 class AlmuerzoHorariosAdminWeb extends StatelessWidget {
   const AlmuerzoHorariosAdminWeb({
@@ -16,23 +19,14 @@ class AlmuerzoHorariosAdminWeb extends StatelessWidget {
   final String? sedeId;
 
   static const List<_AlmuerzoSlotOption> _almuerzoSlots = [
-    _AlmuerzoSlotOption(
-      inicio: '13:00',
-      fin: '13:45',
-      label: '13:00 a 13:45',
-    ),
-    _AlmuerzoSlotOption(
-      inicio: '13:45',
-      fin: '14:30',
-      label: '13:45 a 14:30',
-    ),
+    _AlmuerzoSlotOption(inicio: '13:00', fin: '13:45', label: '13:00 a 13:45'),
+    _AlmuerzoSlotOption(inicio: '13:45', fin: '14:30', label: '13:45 a 14:30'),
   ];
 
   static final FirebaseService _service = FirebaseService();
 
   String get _resolvedSedeId =>
-      sedeId ??
-      (isSedeNorte ? SedeAccess.sedeNorteId : SedeAccess.matrizId);
+      sedeId ?? (isSedeNorte ? SedeAccess.sedeNorteId : SedeAccess.matrizId);
 
   AppBranding get _branding => AppBranding.fromSedeId(_resolvedSedeId);
 
@@ -46,8 +40,7 @@ class AlmuerzoHorariosAdminWeb extends StatelessWidget {
   }
 
   bool _isAdministrativeStaff(Map<String, dynamic> data) {
-    final rol = (data['rol'] ?? '').toString().trim().toLowerCase();
-    return rol == 'administrativo';
+    return UserRoleAccess.isAdministrativeRole(data['rol']);
   }
 
   List<_AdministrativoAlmuerzoView> _buildAdministrativos(
@@ -66,8 +59,8 @@ class AlmuerzoHorariosAdminWeb extends StatelessWidget {
           docId: doc.id,
           nombre: (data['nombre'] ?? 'Sin nombre').toString(),
           correo: (data['correo'] ?? '').toString(),
-          horarioAsignado:
-              (data['almuerzo_horario_label'] ?? 'Sin asignar').toString(),
+          horarioAsignado: (data['almuerzo_horario_label'] ?? 'Sin asignar')
+              .toString(),
         ),
       );
     }
@@ -126,7 +119,7 @@ class AlmuerzoHorariosAdminWeb extends StatelessWidget {
                   colors: [
                     _surface,
                     Colors.white,
-                    _softAccent.withOpacity(0.42),
+                    _softAccent.withValues(alpha: 0.42),
                   ],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
@@ -149,7 +142,9 @@ class AlmuerzoHorariosAdminWeb extends StatelessWidget {
             ),
           ),
           StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance.collection('usuarios').snapshots(),
+            stream: FirebaseFirestore.instance
+                .collection('usuarios')
+                .snapshots(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
@@ -159,48 +154,72 @@ class AlmuerzoHorariosAdminWeb extends StatelessWidget {
                 snapshot.data?.docs ?? <QueryDocumentSnapshot>[],
               );
 
-              return SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(24, 28, 24, 36),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildHeroHeader(administrativos.length),
-                    const SizedBox(height: 24),
-                    if (administrativos.isEmpty)
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 24,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.94),
-                          borderRadius: BorderRadius.circular(24),
-                          border: Border.all(color: _primary.withOpacity(0.12)),
-                        ),
-                        child: Text(
-                          'No hay administrativos registrados en ${SedeAccess.displayNameForId(_resolvedSedeId)} para asignar horarios de almuerzo.',
-                          style: TextStyle(
-                            color: _primaryDark.withOpacity(0.76),
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      )
-                    else
-                      Wrap(
-                        spacing: 18,
-                        runSpacing: 18,
-                        children: administrativos
-                            .map(
-                              (administrativo) => _buildAdministrativoCard(
-                                context,
-                                administrativo,
+              return LayoutBuilder(
+                builder: (context, constraints) {
+                  final isCompact = constraints.maxWidth < 760;
+                  final horizontalPadding = isCompact ? 16.0 : 24.0;
+                  final cardWidth = math.min(
+                    390.0,
+                    math.max(
+                      0.0,
+                      constraints.maxWidth - (horizontalPadding * 2),
+                    ),
+                  );
+
+                  return SingleChildScrollView(
+                    padding: EdgeInsets.fromLTRB(
+                      horizontalPadding,
+                      isCompact ? 20 : 28,
+                      horizontalPadding,
+                      36,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildHeroHeader(administrativos.length),
+                        const SizedBox(height: 24),
+                        if (administrativos.isEmpty)
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 24,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.94),
+                              borderRadius: BorderRadius.circular(24),
+                              border: Border.all(
+                                color: _primary.withValues(alpha: 0.12),
                               ),
-                            )
-                            .toList(),
-                      ),
-                  ],
-                ),
+                            ),
+                            child: Text(
+                              'No hay administrativos registrados en ${SedeAccess.displayNameForId(_resolvedSedeId)} para asignar horarios de almuerzo.',
+                              style: TextStyle(
+                                color: _primaryDark.withValues(alpha: 0.76),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          )
+                        else
+                          Wrap(
+                            spacing: 18,
+                            runSpacing: 18,
+                            children: administrativos
+                                .map(
+                                  (administrativo) => SizedBox(
+                                    width: cardWidth,
+                                    child: _buildAdministrativoCard(
+                                      context,
+                                      administrativo,
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                      ],
+                    ),
+                  );
+                },
               );
             },
           ),
@@ -210,85 +229,27 @@ class AlmuerzoHorariosAdminWeb extends StatelessWidget {
   }
 
   Widget _buildHeroHeader(int totalAdministrativos) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(26),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [_primaryDark, _primary, _primary.withOpacity(0.86)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+    return BootstrapAdminHero(
+      branding: _branding,
+      icon: Icons.schedule_rounded,
+      eyebrow: 'Configuracion operativa',
+      title: 'Asignar horarios de almuerzo',
+      subtitle:
+          'Seleccione un bloque de almuerzo para cada administrativo de ${SedeAccess.displayNameForId(_resolvedSedeId)}. Cada asignacion se guarda por sede y envia una notificacion al usuario.',
+      footer: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: Colors.white24),
         ),
-        borderRadius: BorderRadius.circular(28),
-        boxShadow: [
-          BoxShadow(
-            color: _primary.withOpacity(0.18),
-            blurRadius: 24,
-            offset: const Offset(0, 14),
+        child: Text(
+          'Administrativos disponibles: $totalAdministrativos',
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
           ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 66,
-            height: 66,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white24),
-            ),
-            child: const Icon(
-              Icons.schedule_rounded,
-              color: Colors.white,
-              size: 34,
-            ),
-          ),
-          const SizedBox(width: 18),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Asignar horarios de almuerzo',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 28,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Seleccione un bloque de almuerzo para cada administrativo de ${SedeAccess.displayNameForId(_resolvedSedeId)}. Cada asignacion se guarda por sede y envia una notificacion al usuario.',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.92),
-                    height: 1.45,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: Colors.white24),
-                  ),
-                  child: Text(
-                    'Administrativos disponibles: $totalAdministrativos',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -298,26 +259,22 @@ class AlmuerzoHorariosAdminWeb extends StatelessWidget {
     _AdministrativoAlmuerzoView administrativo,
   ) {
     return Container(
-      width: 390,
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [
-            Colors.white,
-            _surface.withOpacity(0.78),
-          ],
+          colors: [Colors.white, _surface.withValues(alpha: 0.78)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(26),
-        border: Border.all(color: _primary.withOpacity(0.22), width: 1.4),
+        border: Border.all(color: _primary.withValues(alpha: 0.22), width: 1.4),
         boxShadow: [
           BoxShadow(
-            color: _primary.withOpacity(0.12),
+            color: _primary.withValues(alpha: 0.12),
             blurRadius: 28,
             offset: const Offset(0, 14),
           ),
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 12,
             offset: const Offset(0, 6),
           ),
@@ -329,12 +286,12 @@ class AlmuerzoHorariosAdminWeb extends StatelessWidget {
           Container(
             padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
             decoration: BoxDecoration(
-              color: _primary.withOpacity(0.08),
+              color: _primary.withValues(alpha: 0.08),
               borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(24),
               ),
               border: Border(
-                bottom: BorderSide(color: _primary.withOpacity(0.10)),
+                bottom: BorderSide(color: _primary.withValues(alpha: 0.10)),
               ),
             ),
             child: Row(
@@ -343,9 +300,9 @@ class AlmuerzoHorariosAdminWeb extends StatelessWidget {
                   width: 52,
                   height: 52,
                   decoration: BoxDecoration(
-                    color: _primary.withOpacity(0.12),
+                    color: _primary.withValues(alpha: 0.12),
                     shape: BoxShape.circle,
-                    border: Border.all(color: _primary.withOpacity(0.18)),
+                    border: Border.all(color: _primary.withValues(alpha: 0.18)),
                   ),
                   child: Center(
                     child: Text(
@@ -367,6 +324,8 @@ class AlmuerzoHorariosAdminWeb extends StatelessWidget {
                     children: [
                       Text(
                         administrativo.nombre,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w800,
@@ -376,8 +335,10 @@ class AlmuerzoHorariosAdminWeb extends StatelessWidget {
                       const SizedBox(height: 5),
                       Text(
                         administrativo.correo,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          color: _primaryDark.withOpacity(0.78),
+                          color: _primaryDark.withValues(alpha: 0.78),
                           fontWeight: FontWeight.w500,
                           fontSize: 13.5,
                         ),
@@ -402,10 +363,10 @@ class AlmuerzoHorariosAdminWeb extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: _primary.withOpacity(0.14)),
+                    border: Border.all(color: _primary.withValues(alpha: 0.14)),
                     boxShadow: [
                       BoxShadow(
-                        color: _primary.withOpacity(0.04),
+                        color: _primary.withValues(alpha: 0.04),
                         blurRadius: 10,
                         offset: const Offset(0, 4),
                       ),
@@ -435,7 +396,7 @@ class AlmuerzoHorariosAdminWeb extends StatelessWidget {
                 Text(
                   'Seleccionar bloque',
                   style: TextStyle(
-                    color: _primaryDark.withOpacity(0.75),
+                    color: _primaryDark.withValues(alpha: 0.75),
                     fontWeight: FontWeight.w700,
                     fontSize: 13,
                     letterSpacing: 0.2,
@@ -457,11 +418,18 @@ class AlmuerzoHorariosAdminWeb extends StatelessWidget {
                           label: Text(slot.label),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: _primary,
-                            backgroundColor: Colors.white.withOpacity(0.9),
-                            side: BorderSide(color: _primary.withOpacity(0.24)),
+                            backgroundColor: _primary.withValues(alpha: 0.06),
+                            side: BorderSide(
+                              color: _primary.withValues(alpha: 0.30),
+                              width: 1.4,
+                            ),
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 12,
+                              horizontal: 16,
+                              vertical: 13,
+                            ),
+                            textStyle: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13.5,
                             ),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(14),
@@ -479,13 +447,14 @@ class AlmuerzoHorariosAdminWeb extends StatelessWidget {
     );
   }
 
+  // ignore: unused_element
   Widget _buildInfoPill(IconData icon, String text) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: _surface,
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: _primary.withOpacity(0.12)),
+        border: Border.all(color: _primary.withValues(alpha: 0.12)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

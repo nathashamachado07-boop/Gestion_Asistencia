@@ -32,9 +32,7 @@ class AlmuerzosRRHHScreen extends StatelessWidget {
 }
 
 class _AlmuerzosSedeDetalle extends StatefulWidget {
-  const _AlmuerzosSedeDetalle({
-    required this.option,
-  });
+  const _AlmuerzosSedeDetalle({required this.option});
 
   final RRHHSedeOption option;
 
@@ -84,51 +82,71 @@ class _AlmuerzosSedeDetalleState extends State<_AlmuerzosSedeDetalle> {
   }) {
     final busqueda = _normalize(_busquedaController.text);
 
-    final registros = docs.where((doc) {
-      final data = doc.data() as Map<String, dynamic>;
-      final correo = (data['correo_usuario'] ?? '').toString().trim().toLowerCase();
-      final usuario = usuariosPorCorreo[correo];
-      final coincideRegistro = SedeAccess.matchesSede(data, widget.option.sedeId);
-      final coincideUsuario =
-          usuario != null && SedeAccess.matchesSede(usuario, widget.option.sedeId);
+    final registros =
+        docs
+            .where((doc) {
+              final data = doc.data() as Map<String, dynamic>;
+              final correo = (data['correo_usuario'] ?? '')
+                  .toString()
+                  .trim()
+                  .toLowerCase();
+              final usuario = usuariosPorCorreo[correo];
+              final coincideRegistro = SedeAccess.matchesSede(
+                data,
+                widget.option.sedeId,
+              );
+              final coincideUsuario =
+                  usuario != null &&
+                  SedeAccess.matchesSede(usuario, widget.option.sedeId);
 
-      if (!coincideRegistro && !coincideUsuario) {
-        return false;
-      }
+              if (!coincideRegistro && !coincideUsuario) {
+                return false;
+              }
 
-      final estado = (data['estado'] ?? '').toString().trim();
-      final nombre =
-          (data['nombre_usuario'] ?? usuario?['nombre'] ?? '').toString().trim();
+              final estado = (data['estado'] ?? '').toString().trim();
+              final nombre =
+                  (data['nombre_usuario'] ?? usuario?['nombre'] ?? '')
+                      .toString()
+                      .trim();
 
-      if (_estadoFiltro != 'Todos' && estado != _estadoFiltro) {
-        return false;
-      }
+              if (_estadoFiltro != 'Todos' && estado != _estadoFiltro) {
+                return false;
+              }
 
-      if (busqueda.isNotEmpty &&
-          !_normalize(nombre).contains(busqueda) &&
-          !correo.contains(busqueda)) {
-        return false;
-      }
+              if (busqueda.isNotEmpty &&
+                  !_normalize(nombre).contains(busqueda) &&
+                  !correo.contains(busqueda)) {
+                return false;
+              }
 
-      return true;
-    }).map((doc) {
-      final data = doc.data() as Map<String, dynamic>;
-      final correo = (data['correo_usuario'] ?? '').toString().trim().toLowerCase();
-      final usuario = usuariosPorCorreo[correo];
-      return _RegistroAlmuerzoView(
-        nombre:
-            (data['nombre_usuario'] ?? usuario?['nombre'] ?? 'Sin nombre').toString(),
-        correo: (data['correo_usuario'] ?? '').toString(),
-        fecha: (data['fecha'] ?? '').toString(),
-        horaSalida: (data['hora_salida'] ?? '--:--').toString(),
-        horaRegreso: (data['hora_regreso'] ?? '--:--').toString(),
-        estado: (data['estado'] ?? '').toString(),
-        tipoHorario:
-            (data['tipo_horario'] ?? usuario?['tipo_horario'] ?? '--').toString(),
-        momento: _parseMomento(data),
-      );
-    }).toList()
-      ..sort((a, b) => b.momento.compareTo(a.momento));
+              return true;
+            })
+            .map((doc) {
+              final data = doc.data() as Map<String, dynamic>;
+              final correo = (data['correo_usuario'] ?? '')
+                  .toString()
+                  .trim()
+                  .toLowerCase();
+              final usuario = usuariosPorCorreo[correo];
+              return _RegistroAlmuerzoView(
+                nombre:
+                    (data['nombre_usuario'] ??
+                            usuario?['nombre'] ??
+                            'Sin nombre')
+                        .toString(),
+                correo: (data['correo_usuario'] ?? '').toString(),
+                fecha: (data['fecha'] ?? '').toString(),
+                horaSalida: (data['hora_salida'] ?? '--:--').toString(),
+                horaRegreso: (data['hora_regreso'] ?? '--:--').toString(),
+                estado: (data['estado'] ?? '').toString(),
+                tipoHorario:
+                    (data['tipo_horario'] ?? usuario?['tipo_horario'] ?? '--')
+                        .toString(),
+                momento: _parseMomento(data),
+              );
+            })
+            .toList()
+          ..sort((a, b) => b.momento.compareTo(a.momento));
 
     return registros;
   }
@@ -136,7 +154,9 @@ class _AlmuerzosSedeDetalleState extends State<_AlmuerzosSedeDetalle> {
   String _formatFecha(String fecha) {
     if (fecha.isEmpty) return '--';
     try {
-      return DateFormat('dd/MM/yyyy').format(DateFormat('yyyy-MM-dd').parse(fecha));
+      return DateFormat(
+        'dd/MM/yyyy',
+      ).format(DateFormat('yyyy-MM-dd').parse(fecha));
     } catch (_) {
       return fecha;
     }
@@ -165,10 +185,14 @@ class _AlmuerzosSedeDetalleState extends State<_AlmuerzosSedeDetalle> {
           }
 
           final usuariosPorCorreo = <String, Map<String, dynamic>>{};
-          for (final doc in usuariosSnapshot.data?.docs ?? <QueryDocumentSnapshot>[]) {
+          for (final doc
+              in usuariosSnapshot.data?.docs ?? <QueryDocumentSnapshot>[]) {
             final data = doc.data() as Map<String, dynamic>;
             if (!_isTrackedUser(data)) continue;
-            final correo = (data['correo'] ?? '').toString().trim().toLowerCase();
+            final correo = (data['correo'] ?? '')
+                .toString()
+                .trim()
+                .toLowerCase();
             if (correo.isNotEmpty) {
               usuariosPorCorreo[correo] = data;
             }
@@ -188,12 +212,15 @@ class _AlmuerzosSedeDetalleState extends State<_AlmuerzosSedeDetalle> {
               final estados = <String>{
                 'Todos',
                 ...docs
-                    .map((doc) => (doc.data() as Map<String, dynamic>)['estado'])
+                    .map(
+                      (doc) => (doc.data() as Map<String, dynamic>)['estado'],
+                    )
                     .whereType<String>()
                     .where((value) => value.trim().isNotEmpty),
               }.toList();
-              final estadoValue =
-                  estados.contains(_estadoFiltro) ? _estadoFiltro : 'Todos';
+              final estadoValue = estados.contains(_estadoFiltro)
+                  ? _estadoFiltro
+                  : 'Todos';
               final registros = _filtrarRegistros(
                 docs: docs,
                 usuariosPorCorreo: usuariosPorCorreo,
@@ -214,7 +241,9 @@ class _AlmuerzosSedeDetalleState extends State<_AlmuerzosSedeDetalle> {
                               borderRadius: BorderRadius.circular(22),
                               boxShadow: [
                                 BoxShadow(
-                                  color: _branding.primary.withOpacity(0.08),
+                                  color: _branding.primary.withValues(
+                                    alpha: 0.08,
+                                  ),
                                   blurRadius: 14,
                                   offset: const Offset(0, 8),
                                 ),
@@ -227,8 +256,10 @@ class _AlmuerzosSedeDetalleState extends State<_AlmuerzosSedeDetalle> {
                                   onChanged: (_) => setState(() {}),
                                   decoration: InputDecoration(
                                     hintText: 'Buscar colaborador o correo',
-                                    prefixIcon:
-                                        Icon(Icons.search, color: _branding.primary),
+                                    prefixIcon: Icon(
+                                      Icons.search,
+                                      color: _branding.primary,
+                                    ),
                                     filled: true,
                                     fillColor: _branding.surface,
                                     border: OutlineInputBorder(
@@ -239,7 +270,7 @@ class _AlmuerzosSedeDetalleState extends State<_AlmuerzosSedeDetalle> {
                                 ),
                                 const SizedBox(height: 14),
                                 DropdownButtonFormField<String>(
-                                  value: estadoValue,
+                                  initialValue: estadoValue,
                                   decoration: InputDecoration(
                                     labelText: 'Estado',
                                     filled: true,
@@ -334,7 +365,7 @@ class _AlmuerzosSedeDetalleState extends State<_AlmuerzosSedeDetalle> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.14),
+        color: Colors.white.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
@@ -360,7 +391,7 @@ class _AlmuerzosSedeDetalleState extends State<_AlmuerzosSedeDetalle> {
         borderRadius: BorderRadius.circular(22),
         boxShadow: [
           BoxShadow(
-            color: _branding.primary.withOpacity(0.06),
+            color: _branding.primary.withValues(alpha: 0.06),
             blurRadius: 12,
             offset: const Offset(0, 8),
           ),
@@ -373,7 +404,7 @@ class _AlmuerzosSedeDetalleState extends State<_AlmuerzosSedeDetalle> {
             children: [
               CircleAvatar(
                 radius: 22,
-                backgroundColor: _branding.primary.withOpacity(0.12),
+                backgroundColor: _branding.primary.withValues(alpha: 0.12),
                 child: Icon(
                   Icons.restaurant_menu_outlined,
                   color: _branding.primary,
@@ -403,9 +434,12 @@ class _AlmuerzosSedeDetalleState extends State<_AlmuerzosSedeDetalle> {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
-                  color: colorEstado.withOpacity(0.12),
+                  color: colorEstado.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
@@ -426,9 +460,18 @@ class _AlmuerzosSedeDetalleState extends State<_AlmuerzosSedeDetalle> {
             spacing: 10,
             runSpacing: 10,
             children: [
-              _buildInfoChip(Icons.calendar_today_outlined, _formatFecha(registro.fecha)),
-              _buildInfoChip(Icons.logout_rounded, 'Salida: ${registro.horaSalida}'),
-              _buildInfoChip(Icons.login_rounded, 'Regreso: ${registro.horaRegreso}'),
+              _buildInfoChip(
+                Icons.calendar_today_outlined,
+                _formatFecha(registro.fecha),
+              ),
+              _buildInfoChip(
+                Icons.logout_rounded,
+                'Salida: ${registro.horaSalida}',
+              ),
+              _buildInfoChip(
+                Icons.login_rounded,
+                'Regreso: ${registro.horaRegreso}',
+              ),
               _buildInfoChip(Icons.schedule_outlined, registro.tipoHorario),
             ],
           ),
@@ -451,10 +494,7 @@ class _AlmuerzosSedeDetalleState extends State<_AlmuerzosSedeDetalle> {
           const SizedBox(width: 6),
           Text(
             text,
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
           ),
         ],
       ),
@@ -469,7 +509,7 @@ class _AlmuerzosSedeDetalleState extends State<_AlmuerzosSedeDetalle> {
           Icon(
             Icons.restaurant_outlined,
             size: 78,
-            color: _branding.primary.withOpacity(0.38),
+            color: _branding.primary.withValues(alpha: 0.38),
           ),
           const SizedBox(height: 12),
           const Text(

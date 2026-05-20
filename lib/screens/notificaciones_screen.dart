@@ -31,9 +31,9 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
   bool get _isWebLayout => kIsWeb;
 
   AppBranding get _branding => AppBranding.fromLegacy(
-        isSedeNorte: widget.isSedeNorte,
-        sedeId: widget.sedeId,
-      );
+    isSedeNorte: widget.isSedeNorte,
+    sedeId: widget.sedeId,
+  );
 
   @override
   void initState() {
@@ -54,8 +54,9 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
   String _normalizarCorreo(String value) => value.trim().toLowerCase();
 
   bool _esAvisoVisible(Map<String, dynamic> data) {
-    final destinatario =
-        _normalizarCorreo((data['destinatarioCorreo'] ?? '').toString());
+    final destinatario = _normalizarCorreo(
+      (data['destinatarioCorreo'] ?? '').toString(),
+    );
     final correoActual = _normalizarCorreo(widget.correoUsuario);
     if (destinatario.isNotEmpty) {
       return destinatario == correoActual;
@@ -93,42 +94,48 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
         .collection('avisos')
         .orderBy('timestamp', descending: true)
         .snapshots()
-        .listen((snapshot) {
-      final visibles = snapshot.docs.where((doc) {
-        final data = doc.data();
-        return _esAvisoVisible(data);
-      }).map((doc) {
-        final data = doc.data();
-        return _AvisoViewData(
-          id: doc.id,
-          titulo: (data['titulo'] ?? 'Aviso').toString(),
-          mensaje: (data['mensaje'] ?? '').toString(),
-          fecha: _formatearFechaAviso(data),
-          icono: _iconoAviso(data),
+        .listen(
+          (snapshot) {
+            final visibles = snapshot.docs
+                .where((doc) {
+                  final data = doc.data();
+                  return _esAvisoVisible(data);
+                })
+                .map((doc) {
+                  final data = doc.data();
+                  return _AvisoViewData(
+                    id: doc.id,
+                    titulo: (data['titulo'] ?? 'Aviso').toString(),
+                    mensaje: (data['mensaje'] ?? '').toString(),
+                    fecha: _formatearFechaAviso(data),
+                    icono: _iconoAviso(data),
+                  );
+                })
+                .toList();
+
+            if (!mounted) {
+              return;
+            }
+
+            if (_mismaListaAvisos(_avisos, visibles)) {
+              if (_cargando) {
+                setState(() => _cargando = false);
+              }
+              return;
+            }
+
+            setState(() {
+              _avisos = visibles;
+              _cargando = false;
+            });
+          },
+          onError: (_) {
+            if (!mounted) {
+              return;
+            }
+            setState(() => _cargando = false);
+          },
         );
-      }).toList();
-
-      if (!mounted) {
-        return;
-      }
-
-      if (_mismaListaAvisos(_avisos, visibles)) {
-        if (_cargando) {
-          setState(() => _cargando = false);
-        }
-        return;
-      }
-
-      setState(() {
-        _avisos = visibles;
-        _cargando = false;
-      });
-    }, onError: (_) {
-      if (!mounted) {
-        return;
-      }
-      setState(() => _cargando = false);
-    });
   }
 
   bool _mismaListaAvisos(
@@ -158,8 +165,9 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
     }
 
     return Scaffold(
-      backgroundColor:
-          _isWebLayout ? const Color(0xFFF4F7F8) : _branding.background,
+      backgroundColor: _isWebLayout
+          ? const Color(0xFFF4F7F8)
+          : _branding.background,
       body: Stack(
         children: [
           Container(
@@ -181,7 +189,8 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
                       final int row = index ~/ cols;
                       final int col = index % cols;
                       final double offsetX = (row % 2 == 0) ? 0 : spacing / 2;
-                      final double left = col * spacing + offsetX - logoSize / 2;
+                      final double left =
+                          col * spacing + offsetX - logoSize / 2;
                       final double top = row * spacing - logoSize / 2;
 
                       return Positioned(
@@ -214,7 +223,7 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
                       colors: [
-                        _branding.primary.withOpacity(0.8),
+                        _branding.primary.withValues(alpha: 0.8),
                         Colors.transparent,
                       ],
                     ).createShader(rect);
@@ -222,7 +231,8 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
                   blendMode: BlendMode.srcATop,
                   child: Image.asset(
                     _branding.logoWatermark,
-                    width: MediaQuery.of(context).size.width *
+                    width:
+                        MediaQuery.of(context).size.width *
                         _branding.mobileWatermarkWidthFactor,
                     fit: BoxFit.contain,
                   ),
@@ -240,11 +250,12 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
-                  borderRadius:
-                      const BorderRadius.vertical(bottom: Radius.circular(35)),
+                  borderRadius: const BorderRadius.vertical(
+                    bottom: Radius.circular(35),
+                  ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
+                      color: Colors.black.withValues(alpha: 0.2),
                       blurRadius: 15,
                       offset: const Offset(0, 5),
                     ),
@@ -255,8 +266,11 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
                     Image.asset(
                       _branding.logoSmall,
                       height: _branding.mobileHeaderLogoHeight,
-                      errorBuilder: (c, e, s) =>
-                          const Icon(Icons.school, size: 40, color: Colors.white),
+                      errorBuilder: (c, e, s) => const Icon(
+                        Icons.school,
+                        size: 40,
+                        color: Colors.white,
+                      ),
                     ),
                     const SizedBox(height: 10),
                     const Text(
@@ -274,7 +288,9 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
               Expanded(
                 child: _cargando
                     ? Center(
-                        child: CircularProgressIndicator(color: _branding.primary),
+                        child: CircularProgressIndicator(
+                          color: _branding.primary,
+                        ),
                       )
                     : RefreshIndicator(
                         onRefresh: _refrescarNotificaciones,
@@ -300,7 +316,9 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
                                       border: Border.all(
                                         color: _isWebLayout
                                             ? const Color(0xFF4D7374)
-                                            : _branding.primary.withOpacity(0.18),
+                                            : _branding.primary.withValues(
+                                                alpha: 0.18,
+                                              ),
                                         width: _isWebLayout ? 1.4 : 1,
                                       ),
                                     ),
@@ -320,7 +338,9 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
                                 itemBuilder: (context, index) {
                                   if (index == 0) {
                                     return Padding(
-                                      padding: const EdgeInsets.only(bottom: 15),
+                                      padding: const EdgeInsets.only(
+                                        bottom: 15,
+                                      ),
                                       child: Text(
                                         'Comunicados Recientes',
                                         style: TextStyle(
@@ -358,9 +378,7 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
     return Container(
       color: const Color(0xFFF4F7F8),
       child: _cargando
-          ? Center(
-              child: CircularProgressIndicator(color: _branding.primary),
-            )
+          ? Center(child: CircularProgressIndicator(color: _branding.primary))
           : RefreshIndicator(
               onRefresh: _refrescarNotificaciones,
               child: SingleChildScrollView(
@@ -380,7 +398,7 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
                             borderRadius: BorderRadius.circular(28),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
+                                color: Colors.black.withValues(alpha: 0.05),
                                 blurRadius: 18,
                                 offset: const Offset(0, 10),
                               ),
@@ -393,7 +411,9 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
                                 width: 56,
                                 height: 56,
                                 decoration: BoxDecoration(
-                                  color: _branding.primary.withOpacity(0.10),
+                                  color: _branding.primary.withValues(
+                                    alpha: 0.10,
+                                  ),
                                   borderRadius: BorderRadius.circular(18),
                                 ),
                                 child: Icon(
@@ -423,7 +443,9 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
                                       style: TextStyle(
                                         fontSize: 14,
                                         height: 1.45,
-                                        color: Colors.black.withOpacity(0.58),
+                                        color: Colors.black.withValues(
+                                          alpha: 0.58,
+                                        ),
                                       ),
                                     ),
                                   ],
@@ -435,7 +457,9 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
                                   vertical: 10,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: _branding.primary.withOpacity(0.08),
+                                  color: _branding.primary.withValues(
+                                    alpha: 0.08,
+                                  ),
                                   borderRadius: BorderRadius.circular(999),
                                 ),
                                 child: Text(
@@ -461,7 +485,9 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(28),
                               border: Border.all(
-                                color: _branding.primary.withOpacity(0.14),
+                                color: _branding.primary.withValues(
+                                  alpha: 0.14,
+                                ),
                               ),
                             ),
                             child: Column(
@@ -470,7 +496,9 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
                                   width: 68,
                                   height: 68,
                                   decoration: BoxDecoration(
-                                    color: _branding.primary.withOpacity(0.10),
+                                    color: _branding.primary.withValues(
+                                      alpha: 0.10,
+                                    ),
                                     shape: BoxShape.circle,
                                   ),
                                   child: Icon(
@@ -495,7 +523,7 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
                                   style: TextStyle(
                                     fontSize: 14,
                                     height: 1.5,
-                                    color: Colors.black.withOpacity(0.58),
+                                    color: Colors.black.withValues(alpha: 0.58),
                                   ),
                                 ),
                               ],
@@ -506,7 +534,7 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),
                             itemCount: _avisos.length,
-                            separatorBuilder: (_, __) =>
+                            separatorBuilder: (_, _) =>
                                 const SizedBox(height: 16),
                             itemBuilder: (context, index) {
                               final aviso = _avisos[index];
@@ -542,7 +570,9 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
         borderRadius: borderRadius,
         boxShadow: [
           BoxShadow(
-            color: _branding.primary.withOpacity(_isWebLayout ? 0.06 : 0.1),
+            color: _branding.primary.withValues(
+              alpha: _isWebLayout ? 0.06 : 0.1,
+            ),
             blurRadius: _isWebLayout ? 12 : 15,
             offset: Offset(0, _isWebLayout ? 6 : 8),
           ),
@@ -550,7 +580,7 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
         border: Border.all(
           color: _isWebLayout
               ? const Color(0xFF4D7374)
-              : _branding.primary.withOpacity(0.24),
+              : _branding.primary.withValues(alpha: 0.24),
           width: _isWebLayout ? 1.4 : 1,
         ),
       ),
@@ -560,7 +590,7 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
           Container(
             padding: EdgeInsets.all(_isWebLayout ? 12 : 10),
             decoration: BoxDecoration(
-              color: _branding.primary.withOpacity(0.1),
+              color: _branding.primary.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(_isWebLayout ? 16 : 999),
             ),
             child: Icon(icono, color: _branding.primary, size: 24),
@@ -576,7 +606,7 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
                     vertical: 5,
                   ),
                   decoration: BoxDecoration(
-                    color: _branding.primary.withOpacity(0.08),
+                    color: _branding.primary.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
