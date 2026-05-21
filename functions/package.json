@@ -6,7 +6,8 @@
   },
   "main": "index.js",
   "scripts": {
-    "migrate:passwords": "node migrate_passwords.js"
+    "migrate:passwords": "node migrate_passwords.js",
+    "diagnose:legacy": "node diagnose_legacy_data.js"
   },
   "dependencies": {
     "@signpdf/placeholder-pdf-lib": "^3.2.4",

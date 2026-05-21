@@ -23,15 +23,47 @@ const DIGITAL_CERTIFICATE_ITERATIONS = 120000;
 const DIGITAL_CERTIFICATE_KEY_LENGTH = 32;
 const DIGITAL_CERTIFICATE_IV_LENGTH = 12;
 const DIGITAL_CERTIFICATE_ALGORITHM = 'aes-256-gcm';
+const ALLOWED_CORS_ORIGINS = new Set([
+  'https://tesis-intesud.web.app',
+  'https://tesis-intesud.firebaseapp.com',
+]);
 
-function setCorsHeaders(res) {
-  res.set('Access-Control-Allow-Origin', '*');
+function isAllowedCorsOrigin(origin) {
+  if (!origin) {
+    return true;
+  }
+
+  if (
+    /^http:\/\/localhost(?::\d{1,5})?$/.test(origin) ||
+    /^http:\/\/127\.0\.0\.1(?::\d{1,5})?$/.test(origin)
+  ) {
+    return true;
+  }
+
+  return ALLOWED_CORS_ORIGINS.has(origin);
+}
+
+function setCorsHeaders(req, res) {
+  const origin = (req.get('origin') || '').toString().trim();
+  res.set('Vary', 'Origin');
+  if (isAllowedCorsOrigin(origin) && origin) {
+    res.set('Access-Control-Allow-Origin', origin);
+  }
   res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.set('Access-Control-Allow-Headers', 'Content-Type');
+  res.set(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, X-Firebase-AppCheck'
+  );
 }
 
 function handleCors(req, res) {
-  setCorsHeaders(res);
+  setCorsHeaders(req, res);
+
+  const origin = (req.get('origin') || '').toString().trim();
+  if (origin && !isAllowedCorsOrigin(origin)) {
+    res.status(403).json({ message: 'Origen no permitido.' });
+    return true;
+  }
 
   if (req.method === 'OPTIONS') {
     res.status(204).send('');
@@ -59,6 +91,72 @@ function getRequestBody(req) {
 
 function normalizeEmail(value) {
   return (value || '').toString().trim().toLowerCase();
+}
+
+function getBearerToken(req) {
+  const header = (req.get('authorization') || '').toString().trim();
+  if (!header) {
+    return '';
+  }
+
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : '';
+}
+
+function getAppCheckToken(req) {
+  return (req.get('X-Firebase-AppCheck') || '').toString().trim();
+}
+
+function buildHttpError(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+async function validateOptionalRequestSecurity(req, { source, expectedEmail } = {}) {
+  const bearerToken = getBearerToken(req);
+  const appCheckToken = getAppCheckToken(req);
+  let authContext = null;
+  let appCheckContext = null;
+
+  if (bearerToken) {
+    try {
+      authContext = await admin.auth().verifyIdToken(bearerToken);
+    } catch (error) {
+      console.error(`[${source}] Invalid Firebase Auth token:`, error);
+      throw buildHttpError(401, 'Token de autenticacion invalido.');
+    }
+  } else {
+    console.warn(`[${source}] Request without Authorization Bearer token.`);
+  }
+
+  if (appCheckToken) {
+    try {
+      appCheckContext = await admin.appCheck().verifyToken(appCheckToken);
+    } catch (error) {
+      console.error(`[${source}] Invalid App Check token:`, error);
+      throw buildHttpError(401, 'Token de App Check invalido.');
+    }
+  } else {
+    console.warn(`[${source}] Request without App Check token.`);
+  }
+
+  if (authContext && expectedEmail) {
+    const tokenEmail = normalizeEmail(authContext.email);
+    const targetEmail = normalizeEmail(expectedEmail);
+    if (tokenEmail && targetEmail && tokenEmail !== targetEmail) {
+      console.error(
+        `[${source}] Auth token email mismatch.`,
+        { tokenEmail, targetEmail }
+      );
+      throw buildHttpError(
+        403,
+        'El usuario autenticado no coincide con la cuenta solicitada.'
+      );
+    }
+  }
+
+  return { authContext, appCheckContext };
 }
 
 function createPasswordPayload(password) {
@@ -975,6 +1073,11 @@ exports.registerDigitalCertificate = functions.https.onRequest(
         return;
       }
 
+      await validateOptionalRequestSecurity(req, {
+        source: 'registerDigitalCertificate',
+        expectedEmail: correo,
+      });
+
       if (!passwordActual) {
         res.status(400).json({
           message: 'Ingrese la clave actual de la cuenta.',
@@ -1075,6 +1178,13 @@ exports.registerDigitalCertificate = functions.https.onRequest(
       });
     } catch (error) {
       console.error('Register digital certificate failed:', error);
+      const status = Number(error?.status) || 500;
+      if (status !== 500) {
+        res.status(status).json({
+          message: error.message || 'No se pudo validar la seguridad de la solicitud.',
+        });
+        return;
+      }
       res.status(500).json({
         message:
           'No se pudo registrar el certificado digital en este momento.',
@@ -1104,6 +1214,11 @@ exports.deleteDigitalCertificate = functions.https.onRequest(async (req, res) =>
       return;
     }
 
+    await validateOptionalRequestSecurity(req, {
+      source: 'deleteDigitalCertificate',
+      expectedEmail: correo,
+    });
+
     if (!passwordActual) {
       res.status(400).json({
         message: 'Ingrese la clave actual de la cuenta.',
@@ -1132,6 +1247,13 @@ exports.deleteDigitalCertificate = functions.https.onRequest(async (req, res) =>
     });
   } catch (error) {
     console.error('Delete digital certificate failed:', error);
+    const status = Number(error?.status) || 500;
+    if (status !== 500) {
+      res.status(status).json({
+        message: error.message || 'No se pudo validar la seguridad de la solicitud.',
+      });
+      return;
+    }
     res.status(500).json({
       message: 'No se pudo eliminar el certificado digital en este momento.',
     });
@@ -1161,6 +1283,11 @@ exports.verifyDigitalCertificatePassword = functions.https.onRequest(
         res.status(400).json({ message: 'Ingrese un correo valido.' });
         return;
       }
+
+      await validateOptionalRequestSecurity(req, {
+        source: 'verifyDigitalCertificatePassword',
+        expectedEmail: correo,
+      });
 
       if (!certificatePassword) {
         res.status(400).json({
@@ -1220,6 +1347,13 @@ exports.verifyDigitalCertificatePassword = functions.https.onRequest(
       });
     } catch (error) {
       console.error('Verify digital certificate password failed:', error);
+      const status = Number(error?.status) || 500;
+      if (status !== 500) {
+        res.status(status).json({
+          message: error.message || 'No se pudo validar la seguridad de la solicitud.',
+        });
+        return;
+      }
       res.status(500).json({
         message:
           'No se pudo validar el certificado digital en este momento.',
@@ -1256,6 +1390,11 @@ exports.signPdfWithDigitalCertificate = functions.https.onRequest(
         res.status(400).json({ message: 'Ingrese un correo valido.' });
         return;
       }
+
+      await validateOptionalRequestSecurity(req, {
+        source: 'signPdfWithDigitalCertificate',
+        expectedEmail: correo,
+      });
 
       if (!certificatePassword) {
         res.status(400).json({
@@ -1335,6 +1474,13 @@ exports.signPdfWithDigitalCertificate = functions.https.onRequest(
       });
     } catch (error) {
       console.error('Sign PDF with digital certificate failed:', error);
+      const status = Number(error?.status) || 500;
+      if (status !== 500) {
+        res.status(status).json({
+          message: error.message || 'No se pudo validar la seguridad de la solicitud.',
+        });
+        return;
+      }
       res.status(500).json({
         message: 'No se pudo firmar digitalmente el PDF en este momento.',
       });

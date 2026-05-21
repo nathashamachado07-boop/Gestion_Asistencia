@@ -179,6 +179,8 @@ class AlmuerzosAdminWeb extends StatelessWidget {
           StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
                 .collection('registros_almuerzo')
+                .where('sedeId', isEqualTo: _resolvedSedeId)
+                .orderBy('timestamp', descending: true)
                 .snapshots(),
             builder: (context, almuerzosSnapshot) {
               if (almuerzosSnapshot.connectionState ==
@@ -189,6 +191,15 @@ class AlmuerzosAdminWeb extends StatelessWidget {
               return StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
                     .collection('usuarios')
+                    .where('sedeId', isEqualTo: _resolvedSedeId)
+                    .where(
+                      'rol',
+                      whereIn: const [
+                        'Docente',
+                        'Personal administrativo',
+                        'Administrativo',
+                      ],
+                    )
                     .snapshots(),
                 builder: (context, usuariosSnapshot) {
                   if (usuariosSnapshot.connectionState ==
@@ -271,7 +282,7 @@ class AlmuerzosAdminWeb extends StatelessWidget {
                                 color: Colors.white.withValues(alpha: 0.94),
                                 borderRadius: BorderRadius.circular(24),
                                 border: Border.all(
-                                  color: _primary.withValues(alpha: 0.14),
+                                  color: _primary.withValues(alpha: 0.26),
                                 ),
                                 boxShadow: [
                                   BoxShadow(
@@ -343,7 +354,7 @@ class AlmuerzosAdminWeb extends StatelessWidget {
                                         borderRadius: BorderRadius.circular(18),
                                         border: Border.all(
                                           color: _primary.withValues(
-                                            alpha: 0.12,
+                                            alpha: 0.24,
                                           ),
                                         ),
                                       ),
@@ -408,7 +419,7 @@ class AlmuerzosAdminWeb extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.96),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: color.withValues(alpha: 0.18)),
+        border: Border.all(color: color.withValues(alpha: 0.30)),
         boxShadow: [
           BoxShadow(
             color: color.withValues(alpha: 0.09),
@@ -430,7 +441,7 @@ class AlmuerzosAdminWeb extends StatelessWidget {
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: color.withValues(alpha: 0.18)),
+              border: Border.all(color: color.withValues(alpha: 0.30)),
             ),
             child: Icon(icon, color: color),
           ),
@@ -521,7 +532,7 @@ class AlmuerzosAdminWeb extends StatelessWidget {
       decoration: BoxDecoration(
         color: _surface.withValues(alpha: 0.78),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _primary.withValues(alpha: 0.12)),
+        border: Border.all(color: _primary.withValues(alpha: 0.24)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -584,7 +595,7 @@ class AlmuerzosAdminWeb extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: _primary.withValues(alpha: 0.12)),
+        border: Border.all(color: _primary.withValues(alpha: 0.24)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -611,7 +622,7 @@ class AlmuerzosAdminWeb extends StatelessWidget {
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.11),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.28)),
+        border: Border.all(color: color.withValues(alpha: 0.40)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

@@ -30,6 +30,7 @@ class _LoginWebState extends State<LoginWeb> {
   bool _recordarme = false;
   bool _mostrarPassword = false;
   bool _aceptaTerminos = false;
+  bool _assetsPrecached = false;
 
   AppBranding get _branding =>
       AppBranding.fromSedeId(widget.appConfig.defaultSedeId);
@@ -45,6 +46,23 @@ class _LoginWebState extends State<LoginWeb> {
     _correoController.dispose();
     _passController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_assetsPrecached) {
+      return;
+    }
+    _assetsPrecached = true;
+    precacheImage(
+      const AssetImage('assets/images/imagen_fondo.png'),
+      context,
+    );
+    precacheImage(
+      const AssetImage('assets/images/logo_intesud.png'),
+      context,
+    );
   }
 
   void _cargarCredencialesRecordadas() {
@@ -328,7 +346,7 @@ class _LoginWebState extends State<LoginWeb> {
                     color: Colors.white.withValues(alpha: 0.97),
                     borderRadius: BorderRadius.circular(28),
                     border: Border.all(
-                      color: _branding.primary.withValues(alpha: 0.10),
+                      color: _branding.primary.withValues(alpha: 0.30),
                     ),
                     boxShadow: [
                       BoxShadow(
@@ -360,7 +378,7 @@ class _LoginWebState extends State<LoginWeb> {
                                 color: _branding.primary.withValues(alpha: 0.10),
                                 borderRadius: BorderRadius.circular(999),
                                 border: Border.all(
-                                  color: _branding.primary.withValues(alpha: 0.18),
+                                  color: _branding.primary.withValues(alpha: 0.40),
                                 ),
                               ),
                               child: Row(
@@ -597,13 +615,13 @@ class _LoginWebState extends State<LoginWeb> {
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
         borderSide: BorderSide(
-          color: _branding.primary.withValues(alpha: 0.10),
+          color: _branding.primary.withValues(alpha: 0.32),
         ),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
         borderSide: BorderSide(
-          color: _branding.primary.withValues(alpha: 0.12),
+          color: _branding.primary.withValues(alpha: 0.36),
         ),
       ),
       focusedBorder: OutlineInputBorder(

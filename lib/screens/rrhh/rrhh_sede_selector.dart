@@ -140,7 +140,7 @@ class RRHHSedeSelectorPage extends StatelessWidget {
                             color: Colors.white.withValues(alpha: 0.18),
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.35),
+                              color: Colors.white.withValues(alpha: 0.55),
                             ),
                           ),
                           child: const Icon(
@@ -161,7 +161,7 @@ class RRHHSedeSelectorPage extends StatelessWidget {
                       color: Colors.white.withValues(alpha: 0.72),
                       borderRadius: BorderRadius.circular(28),
                       border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.85),
+                        color: branding.primary.withValues(alpha: 0.28),
                       ),
                       boxShadow: [
                         BoxShadow(
@@ -419,7 +419,7 @@ class _SedeCard extends StatelessWidget {
                     color: Colors.black.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(18),
                     border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.08),
+                      color: Colors.white.withValues(alpha: 0.18),
                     ),
                   ),
                   child: Column(

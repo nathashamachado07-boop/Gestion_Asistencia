@@ -137,21 +137,64 @@ class _PersonalAdminWebState extends State<PersonalAdminWeb> {
   }
 
   Stream<QuerySnapshot> _buildAreasStream() {
-    final areasQuery = FirebaseFirestore.instance.collection('areas');
-    return _resolvedSedeId == SedeAccess.matrizId
-        ? areasQuery.snapshots()
-        : areasQuery.where('sedeId', isEqualTo: _resolvedSedeId).snapshots();
+    return FirebaseFirestore.instance
+        .collection('areas')
+        .where('sedeId', isEqualTo: _resolvedSedeId)
+        .snapshots();
   }
 
   Stream<QuerySnapshot> _buildUsuariosStream() {
-    // Se mantiene amplio porque la visibilidad final depende de reglas de rol,
-    // sede efectiva y compatibilidad con datos antiguos.
-    return FirebaseFirestore.instance.collection('usuarios').snapshots();
+    Query<Map<String, dynamic>> query = FirebaseFirestore.instance
+        .collection('usuarios')
+        .where('sedeId', isEqualTo: _resolvedSedeId);
+
+    final filtroRolBase = !_mostrarAdminsEnVista && _filtroRol == 'Admin'
+        ? 'Todos'
+        : _filtroRol;
+    final filtroRolActual = filtroRolBase == _roleAcademicUi
+        ? 'Docente'
+        : filtroRolBase;
+
+    if (filtroRolActual == 'Docente') {
+      query = query.where('rol', isEqualTo: 'Docente');
+    } else if (filtroRolActual == 'Personal administrativo') {
+      query = query.where(
+        'rol',
+        whereIn: const ['Personal administrativo', 'Administrativo'],
+      );
+    } else if (filtroRolActual == 'RRHH') {
+      query = query.where('rol', isEqualTo: 'RRHH');
+    } else if (filtroRolActual == 'Admin') {
+      query = query.where('rol', isEqualTo: 'Admin');
+    } else {
+      query = query.where(
+        'rol',
+        whereIn: const [
+          'Docente',
+          'Personal administrativo',
+          'Administrativo',
+          'RRHH',
+          'Admin',
+        ],
+      );
+    }
+
+    return query.snapshots();
   }
 
   void _rebuildStreams() {
     _areasStream = _buildAreasStream();
     _usuariosStream = _buildUsuariosStream();
+  }
+
+  void _actualizarFiltroRol(String value) {
+    if (_filtroRol == value) {
+      return;
+    }
+    setState(() {
+      _filtroRol = value;
+      _rebuildStreams();
+    });
   }
 
   void _programarBusquedaDiferida(String value) {
@@ -624,7 +667,7 @@ class _PersonalAdminWebState extends State<PersonalAdminWeb> {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.97),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: _primary.withValues(alpha: 0.13)),
+        border: Border.all(color: _primary.withValues(alpha: 0.25)),
         boxShadow: [
           BoxShadow(
             color: _primary.withValues(alpha: 0.09),
@@ -647,7 +690,7 @@ class _PersonalAdminWebState extends State<PersonalAdminWeb> {
               color: _softAccent.withValues(alpha: 0.75),
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color: _primary.withValues(alpha: 0.14),
+                color: _primary.withValues(alpha: 0.26),
               ),
             ),
             child: Icon(icon, color: _primaryDark),
@@ -709,7 +752,7 @@ class _PersonalAdminWebState extends State<PersonalAdminWeb> {
           decoration: BoxDecoration(
             color: Colors.white.withValues(alpha: 0.96),
             borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: _primary.withValues(alpha: 0.10)),
+            border: Border.all(color: _primary.withValues(alpha: 0.34)),
           ),
           child: Wrap(
             spacing: 16,
@@ -777,7 +820,7 @@ class _PersonalAdminWebState extends State<PersonalAdminWeb> {
                       ),
                   ],
                   onChanged: (value) =>
-                      setState(() => _filtroRol = value ?? 'Todos'),
+                      _actualizarFiltroRol(value ?? 'Todos'),
                 ),
               ),
               if (!_usaCatalogoFijoMatriz)
@@ -787,7 +830,7 @@ class _PersonalAdminWebState extends State<PersonalAdminWeb> {
                   label: Text('Gestionar departamentos ($totalAreas)'),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: _primaryDark,
-                    side: BorderSide(color: _primary.withValues(alpha: 0.22)),
+                    side: BorderSide(color: _primary.withValues(alpha: 0.34)),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 16,
                       vertical: 15,
@@ -808,7 +851,7 @@ class _PersonalAdminWebState extends State<PersonalAdminWeb> {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.97),
         borderRadius: BorderRadius.circular(26),
-        border: Border.all(color: _primary.withValues(alpha: 0.12)),
+        border: Border.all(color: _primary.withValues(alpha: 0.24)),
         boxShadow: [
           BoxShadow(
             color: _primary.withValues(alpha: 0.05),
@@ -981,7 +1024,7 @@ class _PersonalAdminWebState extends State<PersonalAdminWeb> {
             color: Colors.white.withValues(alpha: 0.98),
             borderRadius: BorderRadius.circular(18),
             border: Border.all(
-              color: _primary.withValues(alpha: 0.13),
+              color: _primary.withValues(alpha: 0.25),
               width: 1.2,
             ),
             boxShadow: [
@@ -1926,11 +1969,11 @@ class _PersonalFormDialogState extends State<_PersonalFormDialog> {
                             fillColor: const Color(0xFFF3F7F5),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(14),
-                              borderSide: BorderSide(
-                                color: widget.branding.primary.withValues(
-                                  alpha: 0.22,
+                                borderSide: BorderSide(
+                                  color: widget.branding.primary.withValues(
+                                    alpha: 0.34,
+                                  ),
                                 ),
-                              ),
                             ),
                           ),
                           validator: (v) {
@@ -1968,7 +2011,7 @@ class _PersonalFormDialogState extends State<_PersonalFormDialog> {
                                 borderRadius: BorderRadius.circular(14),
                                 borderSide: BorderSide(
                                   color: widget.branding.primary.withValues(
-                                    alpha: 0.30,
+                                    alpha: 0.42,
                                   ),
                                 ),
                               ),
@@ -2095,10 +2138,10 @@ class _AreasManagerDialogState extends State<_AreasManagerDialog> {
   }
 
   Stream<QuerySnapshot> _buildAreasStream() {
-    final areasQuery = FirebaseFirestore.instance.collection('areas');
-    return widget.sedeId == SedeAccess.matrizId
-        ? areasQuery.snapshots()
-        : areasQuery.where('sedeId', isEqualTo: widget.sedeId).snapshots();
+    return FirebaseFirestore.instance
+        .collection('areas')
+        .where('sedeId', isEqualTo: widget.sedeId)
+        .snapshots();
   }
 
   List<_AreaOption> _buildAreas(List<QueryDocumentSnapshot> docs) {
@@ -2401,7 +2444,7 @@ class _AreasManagerDialogState extends State<_AreasManagerDialog> {
                           borderRadius: BorderRadius.circular(18),
                           border: Border.all(
                             color: widget.branding.primary.withValues(
-                              alpha: 0.12,
+                              alpha: 0.24,
                             ),
                           ),
                         ),

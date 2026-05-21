@@ -491,7 +491,7 @@ class _ReportesSedeDetalleState extends State<_ReportesSedeDetalle> {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.84),
         borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.9)),
+        border: Border.all(color: _branding.primary.withValues(alpha: 0.30)),
         boxShadow: [
           BoxShadow(
             color: _branding.primary.withValues(alpha: 0.08),
@@ -646,7 +646,7 @@ class _ReportesSedeDetalleState extends State<_ReportesSedeDetalle> {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.88),
         borderRadius: BorderRadius.circular(26),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.92)),
+        border: Border.all(color: _branding.primary.withValues(alpha: 0.32)),
         boxShadow: [
           BoxShadow(
             color: _branding.primary.withValues(alpha: 0.06),

@@ -660,7 +660,7 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _branding.primary.withValues(alpha: 0.12)),
+        border: Border.all(color: _branding.primary.withValues(alpha: 0.24)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
@@ -839,7 +839,7 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.42)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.06),

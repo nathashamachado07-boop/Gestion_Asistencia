@@ -27,9 +27,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
   String mesSeleccionado = 'Abril';
   int anioSeleccionado = 2026;
   String estadoSeleccionado = 'Todos';
-  late Stream<QuerySnapshot> _asistenciasStream;
-  late Stream<QuerySnapshot> _usuariosStream;
-  late Stream<QuerySnapshot> _solicitudesStream;
+  late Future<_ReportesDataBundle> _reportesFuture;
 
   final List<String> meses = const [
     'Enero',
@@ -110,7 +108,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
   @override
   void initState() {
     super.initState();
-    _rebuildStreams();
+    _rebuildData();
   }
 
   @override
@@ -118,38 +116,115 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.sedeId != widget.sedeId ||
         oldWidget.isSedeNorte != widget.isSedeNorte) {
-      _rebuildStreams();
+      _rebuildData();
     }
   }
 
-  Stream<QuerySnapshot> _buildAsistenciasStream() {
-    final asistenciasQuery = FirebaseFirestore.instance.collection(
-      'asistencias_realizadas',
+  Query<Map<String, dynamic>> _buildAsistenciasQuery() {
+    return FirebaseFirestore.instance
+        .collection('asistencias_realizadas')
+        .where(
+          'fecha',
+          isGreaterThanOrEqualTo: Timestamp.fromDate(_periodoInicio),
+        )
+        .where(
+          'fecha',
+          isLessThan: Timestamp.fromDate(_periodoFinExclusivo),
+        );
+  }
+
+  Query<Map<String, dynamic>> _buildUsuariosQuery() {
+    return FirebaseFirestore.instance
+        .collection('usuarios')
+        .where(
+          'rol',
+          whereIn: const [
+            'Docente',
+            'Personal administrativo',
+            'Administrativo',
+          ],
+        );
+  }
+
+  Query<Map<String, dynamic>> _buildSolicitudesQuery() {
+    return FirebaseFirestore.instance
+        .collection('solicitudes')
+        .where('tipo', isEqualTo: 'Permiso')
+        .where('estado', isEqualTo: 'aprobado');
+  }
+
+  void _rebuildData() {
+    _reportesFuture = _loadReportesData();
+  }
+
+  DateTime get _periodoInicio {
+    final mes = mesesMap[mesSeleccionado] ?? 1;
+    return DateTime(anioSeleccionado, mes, 1);
+  }
+
+  DateTime get _periodoFinExclusivo {
+    final inicio = _periodoInicio;
+    return DateTime(inicio.year, inicio.month + 1, 1);
+  }
+
+  void _actualizarPeriodo({
+    String? mes,
+    int? anio,
+  }) {
+    final nuevoMes = mes ?? mesSeleccionado;
+    final nuevoAnio = anio ?? anioSeleccionado;
+    if (nuevoMes == mesSeleccionado && nuevoAnio == anioSeleccionado) {
+      return;
+    }
+    setState(() {
+      mesSeleccionado = nuevoMes;
+      anioSeleccionado = nuevoAnio;
+      _rebuildData();
+    });
+  }
+
+  Future<_ReportesDataBundle> _loadReportesData() async {
+    final results = await Future.wait<QuerySnapshot<Map<String, dynamic>>>([
+      _buildAsistenciasQuery().get(),
+      _buildUsuariosQuery().get(),
+      _buildSolicitudesQuery().get(),
+    ]);
+
+    final asistenciasSnapshot = results[0];
+    final usuariosSnapshot = results[1];
+    final solicitudesSnapshot = results[2];
+
+    final nombresPermitidos = _obtenerUsuariosPermitidosPorSede(
+      usuariosSnapshot.docs,
     );
-    return _resolvedSedeId == SedeAccess.matrizId
-        ? asistenciasQuery.snapshots()
-        : asistenciasQuery
-              .where('sedeId', isEqualTo: _resolvedSedeId)
-              .snapshots();
+    final permisosAprobados = _extraerPermisosAprobadosFiltrados(
+      solicitudesSnapshot.docs,
+    );
+    final registrosFiltrados = _filtrarRegistros(
+      asistenciasSnapshot.docs,
+      nombresPermitidos: nombresPermitidos,
+      permisosAprobados: permisosAprobados,
+    );
+
+    return _ReportesDataBundle(
+      nombresPermitidos: nombresPermitidos,
+      permisosAprobados: permisosAprobados,
+      registrosFiltrados: registrosFiltrados,
+    );
   }
 
-  Stream<QuerySnapshot> _buildUsuariosStream() {
-    return FirebaseFirestore.instance.collection('usuarios').snapshots();
-  }
-
-  Stream<QuerySnapshot> _buildSolicitudesStream() {
-    final solicitudesQuery = FirebaseFirestore.instance.collection('solicitudes');
-    return _resolvedSedeId == SedeAccess.matrizId
-        ? solicitudesQuery.snapshots()
-        : solicitudesQuery
-              .where('sedeId', isEqualTo: _resolvedSedeId)
-              .snapshots();
-  }
-
-  void _rebuildStreams() {
-    _asistenciasStream = _buildAsistenciasStream();
-    _usuariosStream = _buildUsuariosStream();
-    _solicitudesStream = _buildSolicitudesStream();
+  void _logQueryError(
+    String source,
+    Object? error, [
+    StackTrace? stackTrace,
+  ]) {
+    debugPrint('ReportesAdminWeb::$source -> $error');
+    if (stackTrace != null) {
+      debugPrintStack(
+        label: 'ReportesAdminWeb::$source stackTrace',
+        stackTrace: stackTrace,
+      );
+    }
   }
 
   String _normalizarTexto(dynamic value) {
@@ -676,61 +751,20 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFB),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: _asistenciasStream,
-        builder: (context, asistenciasSnapshot) {
-          if (asistenciasSnapshot.hasError) {
+      body: FutureBuilder<_ReportesDataBundle>(
+        future: _reportesFuture,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            _logQueryError('loadReportesData', snapshot.error, snapshot.stackTrace);
             return const Center(child: Text('Error de conexion'));
           }
-          if (!asistenciasSnapshot.hasData) {
+          if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
 
-          return StreamBuilder<QuerySnapshot>(
-            stream: _usuariosStream,
-            builder: (context, usuariosSnapshot) {
-              if (usuariosSnapshot.hasError) {
-                return const Center(
-                  child: Text('Error al cargar usuarios por sede'),
-                );
-              }
-              if (!usuariosSnapshot.hasData) {
-                return const Center(child: CircularProgressIndicator());
-              }
-
-              final nombresPermitidos = _obtenerUsuariosPermitidosPorSede(
-                usuariosSnapshot.data!.docs,
-              );
-
-              return StreamBuilder<QuerySnapshot>(
-                stream: _solicitudesStream,
-                builder: (context, solicitudesSnapshot) {
-                  if (solicitudesSnapshot.hasError) {
-                    return const Center(
-                      child: Text('Error al cargar permisos aprobados'),
-                    );
-                  }
-                  if (!solicitudesSnapshot.hasData) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-
-                  final permisosAprobados = _extraerPermisosAprobadosFiltrados(
-                    solicitudesSnapshot.data!.docs,
-                  );
-
-                  final registrosFiltrados = _filtrarRegistros(
-                    asistenciasSnapshot.data!.docs,
-                    nombresPermitidos: nombresPermitidos,
-                    permisosAprobados: permisosAprobados,
-                  );
-
-                  return _buildContenido(
-                    registrosFiltrados,
-                    mostrarAvisoSede: true,
-                  );
-                },
-              );
-            },
+          return _buildContenido(
+            snapshot.data!.registrosFiltrados,
+            mostrarAvisoSede: true,
           );
         },
       ),
@@ -786,7 +820,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
                     decoration: BoxDecoration(
                       color: Colors.white.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: Colors.white24),
+                      border: Border.all(color: Colors.white38),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -849,7 +883,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(22),
                     border: Border.all(
-                      color: _primaryColor.withValues(alpha: 0.20),
+                      color: _primaryColor.withValues(alpha: 0.32),
                     ),
                     boxShadow: [
                       BoxShadow(
@@ -926,7 +960,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
                                   )
                                   .toList(),
                               onChanged: (val) =>
-                                  setState(() => mesSeleccionado = val!),
+                                  _actualizarPeriodo(mes: val!),
                             ),
                           ),
                           _buildFilterField(
@@ -945,7 +979,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
                                   )
                                   .toList(),
                               onChanged: (val) =>
-                                  setState(() => anioSeleccionado = val!),
+                                  _actualizarPeriodo(anio: val!),
                             ),
                           ),
                           _buildFilterField(
@@ -963,8 +997,15 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
                                     ),
                                   )
                                   .toList(),
-                              onChanged: (val) =>
-                                  setState(() => estadoSeleccionado = val!),
+                              onChanged: (val) {
+                                if (val == null || val == estadoSeleccionado) {
+                                  return;
+                                }
+                                setState(() {
+                                  estadoSeleccionado = val;
+                                  _rebuildData();
+                                });
+                              },
                             ),
                           ),
                           FilledButton.icon(
@@ -1076,7 +1117,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(24),
                     border: Border.all(
-                      color: _primaryColor.withValues(alpha: 0.20),
+                      color: _primaryColor.withValues(alpha: 0.32),
                     ),
                     boxShadow: [
                       BoxShadow(
@@ -1274,7 +1315,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
       decoration: BoxDecoration(
         color: _excelSoftColor.withValues(alpha: 0.55),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _primaryColor.withValues(alpha: 0.24)),
+        border: Border.all(color: _primaryColor.withValues(alpha: 0.36)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1307,7 +1348,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withValues(alpha: 0.26)),
+        border: Border.all(color: color.withValues(alpha: 0.38)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1367,7 +1408,7 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.22)),
+        border: Border.all(color: color.withValues(alpha: 0.34)),
       ),
       child: Text(
         estado,
@@ -1427,6 +1468,18 @@ class _ReportesAdminWebState extends State<ReportesAdminWeb> {
       ),
     );
   }
+}
+
+class _ReportesDataBundle {
+  const _ReportesDataBundle({
+    required this.nombresPermitidos,
+    required this.permisosAprobados,
+    required this.registrosFiltrados,
+  });
+
+  final Set<String> nombresPermitidos;
+  final List<Map<String, dynamic>> permisosAprobados;
+  final List<_ReporteAsistenciaItem> registrosFiltrados;
 }
 
 class _ReporteAsistenciaItem {

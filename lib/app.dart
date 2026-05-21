@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -20,17 +22,18 @@ Future<void> bootstrapApp(AppConfig appConfig) async {
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   }
 
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-
-  await initializeDateFormatting('es_ES', null);
-
-  if (!kIsWeb) {
-    await PushNotificationService.instance.initialize();
-  }
-
-  await AppThemeController.instance.initialize();
+  await Future.wait<void>([
+    Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform),
+    AppThemeController.instance.initialize(),
+  ]);
 
   runApp(AttendanceApp(appConfig: appConfig));
+
+  unawaited(initializeDateFormatting('es_ES', null));
+
+  if (!kIsWeb) {
+    unawaited(PushNotificationService.instance.initialize());
+  }
 }
 
 class AttendanceApp extends StatelessWidget {

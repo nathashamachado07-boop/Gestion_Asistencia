@@ -6,12 +6,14 @@ import '../../services/firebase_service.dart';
 
 class HistorialSolicitudesScreen extends StatefulWidget {
   final String nombreDocente;
+  final String? correoUsuario;
   final bool isSedeNorte;
   final String? sedeId;
 
   const HistorialSolicitudesScreen({
     super.key,
     required this.nombreDocente,
+    this.correoUsuario,
     this.isSedeNorte = false,
     this.sedeId,
   });
@@ -39,6 +41,7 @@ class _HistorialSolicitudesScreenState
   Future<List<Solicitud>> _cargarSolicitudes() {
     return service.obtenerMisSolicitdes(
       widget.nombreDocente,
+      correo: widget.correoUsuario,
       sedeId: widget.sedeId ?? _branding.sedeId,
     );
   }

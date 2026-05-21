@@ -33,7 +33,7 @@ void main() {
 
     test('valida fortaleza minima de contrasena', () {
       expect(
-        PasswordSecurityService.validatePasswordStrength('corta1A'),
+        PasswordSecurityService.validatePasswordStrength('Clave1Aa'),
         isNull,
       );
       expect(

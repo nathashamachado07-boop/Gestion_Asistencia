@@ -1,0 +1,229 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Estas reglas asumen Firebase Auth + custom claims:
+    // - email
+    // - role
+    // - sedeId
+    // - allowedSedeIds
+    // Sin esa capa de autenticacion, el cliente no podra leer ni escribir.
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function authEmail() {
+      return signedIn() && request.auth.token.email is string
+          ? request.auth.token.email
+          : '';
+    }
+
+    function authRole() {
+      return signedIn() && request.auth.token.role is string
+          ? request.auth.token.role
+          : '';
+    }
+
+    function authSedeId() {
+      return signedIn() && request.auth.token.sedeId is string
+          ? request.auth.token.sedeId
+          : 'matriz';
+    }
+
+    function allowedSedeIds() {
+      return signedIn() && request.auth.token.allowedSedeIds is list
+          ? request.auth.token.allowedSedeIds
+          : [];
+    }
+
+    function isAdmin() {
+      return authRole() == 'admin' || authRole() == 'Admin';
+    }
+
+    function isRrhh() {
+      return authRole() == 'rrhh' || authRole() == 'RRHH';
+    }
+
+    function isBackoffice() {
+      return isAdmin() || isRrhh();
+    }
+
+    function hasSedeAccess(sedeId) {
+      return isAdmin() ||
+          authSedeId() == sedeId ||
+          allowedSedeIds().hasAny([sedeId]);
+    }
+
+    function resourceSede() {
+      return resource.data.sedeId is string
+          ? resource.data.sedeId
+          : 'matriz';
+    }
+
+    function requestSede() {
+      return request.resource.data.sedeId is string
+          ? request.resource.data.sedeId
+          : 'matriz';
+    }
+
+    function sameUserEmail(value) {
+      return value is string && value == authEmail();
+    }
+
+    function isOwnUserDoc() {
+      return sameUserEmail(resource.data.correo) ||
+          (resource.data.uid is string && resource.data.uid == request.auth.uid);
+    }
+
+    function isOwnUserRequest() {
+      return sameUserEmail(request.resource.data.correo) ||
+          (request.resource.data.uid is string &&
+              request.resource.data.uid == request.auth.uid);
+    }
+
+    function immutableUserIdentity() {
+      return request.resource.data.correo == resource.data.correo &&
+          request.resource.data.rol == resource.data.rol &&
+          request.resource.data.sedeId == resource.data.sedeId &&
+          request.resource.data.allowedSedeIds == resource.data.allowedSedeIds;
+    }
+
+    function isOwnSolicitud() {
+      return sameUserEmail(resource.data.colaboradorCorreo);
+    }
+
+    function isOwnSolicitudCreate() {
+      return sameUserEmail(request.resource.data.colaboradorCorreo);
+    }
+
+    function isOwnAsistencia() {
+      return sameUserEmail(resource.data.correo_usuario);
+    }
+
+    function isOwnAsistenciaCreate() {
+      return sameUserEmail(request.resource.data.correo_usuario);
+    }
+
+    function isOwnAlmuerzo() {
+      return sameUserEmail(resource.data.correo_usuario);
+    }
+
+    function isOwnAlmuerzoCreate() {
+      return sameUserEmail(request.resource.data.correo_usuario);
+    }
+
+    function isTargetedAviso() {
+      return sameUserEmail(resource.data.destinatarioCorreo);
+    }
+
+    function isBroadcastAvisoForMySede() {
+      return (!('destinatarioCorreo' in resource.data) ||
+              resource.data.destinatarioCorreo == null ||
+              resource.data.destinatarioCorreo == '') &&
+          hasSedeAccess(resourceSede());
+    }
+
+    match /usuarios/{userId} {
+      allow read: if signedIn() &&
+          (isOwnUserDoc() || (isBackoffice() && hasSedeAccess(resourceSede())));
+
+      allow create: if signedIn() &&
+          isBackoffice() &&
+          hasSedeAccess(requestSede());
+
+      allow update: if signedIn() &&
+          (
+            (isOwnUserDoc() && isOwnUserRequest() && immutableUserIdentity()) ||
+            (isBackoffice() && hasSedeAccess(requestSede()))
+          );
+
+      allow delete: if signedIn() &&
+          isBackoffice() &&
+          hasSedeAccess(resourceSede());
+    }
+
+    match /solicitudes/{solicitudId} {
+      allow read: if signedIn() &&
+          (isOwnSolicitud() || (isBackoffice() && hasSedeAccess(resourceSede())));
+
+      allow create: if signedIn() &&
+          isOwnSolicitudCreate() &&
+          hasSedeAccess(requestSede());
+
+      allow update: if signedIn() &&
+          isBackoffice() &&
+          hasSedeAccess(requestSede());
+
+      allow delete: if signedIn() &&
+          isAdmin() &&
+          hasSedeAccess(resourceSede());
+    }
+
+    match /asistencias_realizadas/{asistenciaId} {
+      allow read: if signedIn() &&
+          (isOwnAsistencia() || (isBackoffice() && hasSedeAccess(resourceSede())));
+
+      allow create: if signedIn() &&
+          isOwnAsistenciaCreate() &&
+          hasSedeAccess(requestSede());
+
+      allow update, delete: if false;
+    }
+
+    match /registros_almuerzo/{registroId} {
+      allow read: if signedIn() &&
+          (isOwnAlmuerzo() || (isBackoffice() && hasSedeAccess(resourceSede())));
+
+      allow create: if signedIn() &&
+          isOwnAlmuerzoCreate() &&
+          hasSedeAccess(requestSede());
+
+      allow update: if signedIn() &&
+          (
+            isOwnAlmuerzo() ||
+            (isBackoffice() && hasSedeAccess(requestSede()))
+          );
+
+      allow delete: if false;
+    }
+
+    match /avisos/{avisoId} {
+      allow read: if signedIn() &&
+          (
+            isTargetedAviso() ||
+            isBroadcastAvisoForMySede() ||
+            (isBackoffice() && hasSedeAccess(resourceSede()))
+          );
+
+      // Recomendado: crear/actualizar solo desde Cloud Functions con Admin SDK.
+      allow create, update, delete: if false;
+    }
+
+    match /areas/{areaId} {
+      allow read: if signedIn() && hasSedeAccess(resourceSede());
+
+      allow create: if signedIn() &&
+          isBackoffice() &&
+          hasSedeAccess(requestSede());
+
+      allow update, delete: if signedIn() &&
+          isBackoffice() &&
+          hasSedeAccess(resourceSede());
+    }
+
+    match /horarios_especiales/{horarioId} {
+      allow read: if signedIn() && hasSedeAccess(resourceSede());
+
+      allow create: if signedIn() &&
+          isBackoffice() &&
+          hasSedeAccess(requestSede());
+
+      allow update, delete: if signedIn() &&
+          isBackoffice() &&
+          hasSedeAccess(resourceSede());
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

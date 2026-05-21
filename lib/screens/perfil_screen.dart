@@ -63,8 +63,8 @@ class _PerfilScreenState extends State<PerfilScreen> {
       : _branding.surface;
 
   Color get _outlineColor => _isDarkMode
-      ? Colors.white.withValues(alpha: 0.08)
-      : _branding.primary.withValues(alpha: 0.10);
+      ? Colors.white.withValues(alpha: 0.16)
+      : _branding.primary.withValues(alpha: 0.18);
 
   @override
   void initState() {
@@ -897,7 +897,7 @@ class _PerfilScreenState extends State<PerfilScreen> {
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.14),
                   borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: Colors.white24),
+                  border: Border.all(color: Colors.white38),
                 ),
                 child: const Icon(
                   Icons.person_outline_rounded,
@@ -1037,7 +1037,7 @@ class _PerfilScreenState extends State<PerfilScreen> {
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.14),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white24),
+          border: Border.all(color: Colors.white38),
         ),
         child: const Icon(
           Icons.settings_outlined,
@@ -1058,7 +1058,7 @@ class _PerfilScreenState extends State<PerfilScreen> {
           decoration: BoxDecoration(
             color: Colors.white.withValues(alpha: 0.18),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white24),
+            border: Border.all(color: Colors.white38),
           ),
           child: Text(
             label,

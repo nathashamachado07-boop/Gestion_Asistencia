@@ -422,7 +422,7 @@ class _HorariosEspecialesAdminWebState
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.96),
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: _primary.withValues(alpha: 0.12)),
+        border: Border.all(color: _primary.withValues(alpha: 0.24)),
         boxShadow: [
           BoxShadow(
             color: _primary.withValues(alpha: 0.07),
@@ -567,7 +567,7 @@ class _HorariosEspecialesAdminWebState
       decoration: BoxDecoration(
         color: _surface.withValues(alpha: 0.46),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: _primary.withValues(alpha: 0.14)),
+        border: Border.all(color: _primary.withValues(alpha: 0.26)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -643,7 +643,7 @@ class _HorariosEspecialesAdminWebState
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.96),
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: _primary.withValues(alpha: 0.12)),
+        border: Border.all(color: _primary.withValues(alpha: 0.24)),
         boxShadow: [
           BoxShadow(
             color: _primary.withValues(alpha: 0.05),
@@ -744,7 +744,7 @@ class _HorariosEspecialesAdminWebState
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.98),
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: _primary.withValues(alpha: 0.12)),
+                border: Border.all(color: _primary.withValues(alpha: 0.24)),
                 boxShadow: [
                   BoxShadow(
                     color: _primary.withValues(alpha: 0.06),
@@ -870,7 +870,7 @@ class _HorariosEspecialesAdminWebState
           decoration: BoxDecoration(
             color: _surface.withValues(alpha: 0.62),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: _primary.withValues(alpha: 0.16)),
+            border: Border.all(color: _primary.withValues(alpha: 0.28)),
           ),
           child: Row(
             children: [
@@ -938,7 +938,7 @@ class _HorariosEspecialesAdminWebState
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.86),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: _primary.withValues(alpha: 0.10)),
+        border: Border.all(color: _primary.withValues(alpha: 0.34)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

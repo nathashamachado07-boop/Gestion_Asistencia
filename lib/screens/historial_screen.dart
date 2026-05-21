@@ -104,7 +104,10 @@ class HistorialScreen extends StatelessWidget {
       body: FutureBuilder<List<Map<String, dynamic>>>(
         future: esAlmuerzo
             ? service.obtenerHistorialAlmuerzo(correoUsuario)
-            : service.obtenerHistorialAsistencias(nombreDocente),
+            : service.obtenerHistorialAsistencias(
+                nombreDocente,
+                correoUsuario: correoUsuario,
+              ),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return Center(

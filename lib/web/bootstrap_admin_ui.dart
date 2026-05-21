@@ -5,7 +5,7 @@ import '../models/app_branding.dart';
 class BootstrapAdminUi {
   static const Color pageBackground = Color(0xFFF5F7FB);
   static const Color panelBackground = Colors.white;
-  static const Color panelBorder = Color(0xFFDCE6EF);
+  static const Color panelBorder = Color(0xFFC1D0DB);
   static const Color ink = Color(0xFF22303A);
   static const Color muted = Color(0xFF6B7B8C);
 
@@ -49,7 +49,7 @@ class BootstrapAdminUi {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: accentColor,
-          side: BorderSide(color: accentColor.withValues(alpha: 0.18)),
+          side: BorderSide(color: accentColor.withValues(alpha: 0.28)),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
@@ -120,7 +120,7 @@ class BootstrapAdminUi {
     return BoxDecoration(
       color: accentColor.withValues(alpha: 0.10),
       borderRadius: BorderRadius.circular(radius),
-      border: Border.all(color: accentColor.withValues(alpha: 0.16)),
+      border: Border.all(color: accentColor.withValues(alpha: 0.24)),
     );
   }
 }
@@ -162,7 +162,7 @@ class BootstrapAdminHero extends StatelessWidget {
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.14),
                 borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: Colors.white24),
+                border: Border.all(color: Colors.white38),
               ),
               child: Text(
                 eyebrow,
@@ -181,7 +181,7 @@ class BootstrapAdminHero extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(22),
-                  border: Border.all(color: Colors.white24),
+                  border: Border.all(color: Colors.white38),
                 ),
                 child: Icon(
                   icon,
@@ -206,7 +206,7 @@ class BootstrapAdminHero extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: Colors.white.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(22),
-                      border: Border.all(color: Colors.white24),
+                      border: Border.all(color: Colors.white38),
                     ),
                     child: Icon(
                       icon,
@@ -405,7 +405,7 @@ class BootstrapAdminAlertBar extends StatelessWidget {
       decoration: BoxDecoration(
         color: backgroundColor ?? accentColor.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: accentColor.withValues(alpha: 0.20)),
+        border: Border.all(color: accentColor.withValues(alpha: 0.40)),
       ),
       child: Row(
         children: [

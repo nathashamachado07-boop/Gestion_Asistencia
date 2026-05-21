@@ -19,106 +19,144 @@ class DashboardAdminWeb extends StatelessWidget {
   static const Color _success = Color(0xFF3FA36C);
   static const Color _danger = Color(0xFFD96557);
 
+  Stream<QuerySnapshot> _buildUsuariosStream() {
+    return FirebaseFirestore.instance
+        .collection('usuarios')
+        .where('sedeId', isEqualTo: SedeAccess.matrizId)
+        .where(
+          'rol',
+          whereIn: const [
+            'Docente',
+            'Personal administrativo',
+            'Administrativo',
+          ],
+        )
+        .snapshots();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 28),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildHero(),
-          const SizedBox(height: 28),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final statCardWidth = constraints.maxWidth < 720
-                  ? constraints.maxWidth
-                  : 320.0;
+    return StreamBuilder<QuerySnapshot>(
+      stream: _buildUsuariosStream(),
+      builder: (context, usuariosSnapshot) {
+        final usuarios = usuariosSnapshot.data?.docs ?? const [];
+        final nombresPermitidos = _buildAllowedNames(usuarios);
 
-              return Wrap(
-                spacing: 18,
-                runSpacing: 18,
-                children: [
-                  _buildStatCard(
-                    width: statCardWidth,
-                    title: 'Personal registrado',
-                    icon: Icons.groups_2_outlined,
-                    color: _primary,
-                    stream: FirebaseFirestore.instance
-                        .collection('usuarios')
-                        .snapshots(),
-                    shouldCount: (data) =>
-                        SedeAccess.matchesSede(data, SedeAccess.matrizId) &&
-                        _isTrackedStaff(data),
-                  ),
-                  _buildAttendanceCard(
-                    width: statCardWidth,
-                    title: 'Asistencias de hoy',
-                    icon: Icons.how_to_reg_outlined,
-                    color: _success,
-                    countBuilder: (asistencias, nombresPermitidos) {
-                      final hoy = DateTime.now();
-                      return _countUniqueTrackedPeople(
-                        asistencias,
-                        nombresPermitidos,
-                        predicate: (data) => _isSameDay(data['fecha'], hoy),
-                      );
-                    },
-                  ),
-                  _buildAttendanceCard(
-                    width: statCardWidth,
-                    title: 'Atrasos detectados',
-                    icon: Icons.timer_off_outlined,
-                    color: _danger,
-                    countBuilder: (asistencias, nombresPermitidos) {
-                      final hoy = DateTime.now();
-                      return _countUniqueTrackedPeople(
-                        asistencias,
-                        nombresPermitidos,
-                        predicate: (data) =>
-                            _isSameDay(data['fecha'], hoy) &&
-                            _normalize(data['estado']) == 'atraso',
-                      );
-                    },
-                  ),
-                ],
-              );
-            },
-          ),
-          const SizedBox(height: 28),
-          BootstrapAdminSectionHeading(
-            icon: Icons.groups_2_outlined,
-            title: 'Resumen del personal',
-            subtitle:
-                'Vista ejecutiva del personal, la asistencia y las alertas del dia.',
-            accentColor: _primary,
-          ),
-          const SizedBox(height: 16),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final compacto = constraints.maxWidth < 1100;
-              if (compacto) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildRoleBreakdownPanel(),
-                    const SizedBox(height: 18),
-                    _buildRecentLatePanel(),
-                  ],
-                );
-              }
+        return StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('asistencias_realizadas')
+              .snapshots(),
+          builder: (context, asistenciasSnapshot) {
+            final asistencias = asistenciasSnapshot.data?.docs ?? const [];
+            final isLoading =
+                usuariosSnapshot.connectionState == ConnectionState.waiting ||
+                asistenciasSnapshot.connectionState == ConnectionState.waiting;
 
-              return Row(
+            final hoy = DateTime.now();
+            final totalPersonal = usuarios.length;
+            final asistenciasHoy = _countUniqueTrackedPeople(
+              asistencias,
+              nombresPermitidos,
+              predicate: (data) => _isSameDay(data['fecha'], hoy),
+            );
+            final atrasosHoy = _countUniqueTrackedPeople(
+              asistencias,
+              nombresPermitidos,
+              predicate: (data) =>
+                  _isSameDay(data['fecha'], hoy) &&
+                  _normalize(data['estado']) == 'atraso',
+            );
+
+            return SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 28),
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(child: _buildRoleBreakdownPanel()),
-                  const SizedBox(width: 18),
-                  Expanded(child: _buildRecentLatePanel()),
+                  _buildHero(),
+                  const SizedBox(height: 28),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final statCardWidth = constraints.maxWidth < 720
+                          ? constraints.maxWidth
+                          : 320.0;
+
+                      return Wrap(
+                        spacing: 18,
+                        runSpacing: 18,
+                        children: [
+                          _buildStatCard(
+                            width: statCardWidth,
+                            title: 'Personal registrado',
+                            icon: Icons.groups_2_outlined,
+                            color: _primary,
+                            value: '$totalPersonal',
+                            isLoading: usuariosSnapshot.connectionState ==
+                                ConnectionState.waiting,
+                          ),
+                          _buildStatCard(
+                            width: statCardWidth,
+                            title: 'Asistencias de hoy',
+                            icon: Icons.how_to_reg_outlined,
+                            color: _success,
+                            value: '$asistenciasHoy',
+                            isLoading: isLoading,
+                          ),
+                          _buildStatCard(
+                            width: statCardWidth,
+                            title: 'Atrasos detectados',
+                            icon: Icons.timer_off_outlined,
+                            color: _danger,
+                            value: '$atrasosHoy',
+                            isLoading: isLoading,
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 28),
+                  BootstrapAdminSectionHeading(
+                    icon: Icons.groups_2_outlined,
+                    title: 'Resumen del personal',
+                    subtitle:
+                        'Vista ejecutiva del personal, la asistencia y las alertas del dia.',
+                    accentColor: _primary,
+                  ),
+                  const SizedBox(height: 16),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final compacto = constraints.maxWidth < 1100;
+                      if (compacto) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildRoleBreakdownPanel(usuarios),
+                            const SizedBox(height: 18),
+                            _buildRecentLatePanel(asistencias, nombresPermitidos),
+                          ],
+                        );
+                      }
+
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(child: _buildRoleBreakdownPanel(usuarios)),
+                          const SizedBox(width: 18),
+                          Expanded(
+                            child: _buildRecentLatePanel(
+                              asistencias,
+                              nombresPermitidos,
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
                 ],
-              );
-            },
-          ),
-        ],
-      ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -138,470 +176,307 @@ class DashboardAdminWeb extends StatelessWidget {
     required String title,
     required IconData icon,
     required Color color,
-    required Stream<QuerySnapshot> stream,
-    bool Function(Map<String, dynamic> data)? shouldCount,
+    required String value,
+    required bool isLoading,
   }) {
     return SizedBox(
       width: width,
-      child: StreamBuilder<QuerySnapshot>(
-        stream: stream,
-        builder: (context, snapshot) {
-          final isLoading =
-              snapshot.connectionState == ConnectionState.waiting;
-          final docs = snapshot.data?.docs ?? const [];
-          final count = shouldCount == null
-              ? docs.length
-              : docs.where((doc) {
-                  final data = doc.data() as Map<String, dynamic>;
-                  return shouldCount(data);
-                }).length;
-
-          return AnimatedContainer(
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOut,
-            padding: const EdgeInsets.all(22),
-            decoration: BoxDecoration(
-              color: _card,
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: color.withValues(alpha: 0.14)),
-              boxShadow: [
-                BoxShadow(
-                  color: color.withValues(alpha: 0.08),
-                  blurRadius: 20,
-                  offset: const Offset(0, 8),
-                ),
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.03),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+        padding: const EdgeInsets.all(22),
+        decoration: BoxDecoration(
+          color: _card,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: color.withValues(alpha: 0.26)),
+          boxShadow: [
+            BoxShadow(
+              color: color.withValues(alpha: 0.08),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
             ),
-            child: Row(
-              children: [
-                Container(
-                  width: 52,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: color.withValues(alpha: 0.18),
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.03),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: color.withValues(alpha: 0.30),
+                ),
+              ),
+              child: Icon(icon, color: color),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: _muted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.2,
                     ),
                   ),
-                  child: Icon(icon, color: color),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: const TextStyle(
-                          color: _muted,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.2,
+                  const SizedBox(height: 6),
+                  isLoading
+                      ? Container(
+                          width: 60,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            color: _soft,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        )
+                      : Text(
+                          value,
+                          style: const TextStyle(
+                            color: _ink,
+                            fontSize: 30,
+                            fontWeight: FontWeight.w800,
+                            height: 1.0,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 6),
-                      isLoading
-                          ? Container(
-                              width: 60,
-                              height: 28,
-                              decoration: BoxDecoration(
-                                color: _soft,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            )
-                          : Text(
-                              '$count',
-                              style: const TextStyle(
-                                color: _ink,
-                                fontSize: 30,
-                                fontWeight: FontWeight.w800,
-                                height: 1.0,
-                              ),
-                            ),
-                    ],
-                  ),
-                ),
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isLoading
-                        ? Colors.grey.shade300
-                        : color.withValues(alpha: 0.60),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
-          );
-        },
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isLoading
+                    ? Colors.grey.shade300
+                    : color.withValues(alpha: 0.60),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildAttendanceCard({
-    required double width,
-    required String title,
-    required IconData icon,
-    required Color color,
-    required int Function(
-      List<QueryDocumentSnapshot> asistencias,
-      Set<String> nombresPermitidos,
-    )
-    countBuilder,
-  }) {
-    return SizedBox(
-      width: width,
-      child: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance.collection('usuarios').snapshots(),
-        builder: (context, usuariosSnapshot) {
-          final nombresPermitidos = _buildAllowedNames(
-            usuariosSnapshot.data?.docs ?? const [],
+  Widget _buildRoleBreakdownPanel(List<QueryDocumentSnapshot> docs) {
+    final docentes = docs.where((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+      return _matchesRole(data, 'Docente');
+    }).length;
+    final administrativos = docs.where((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+      return _matchesRole(data, 'Administrativo');
+    }).length;
+    final total = docentes + administrativos;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: _card,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: _accent.withValues(alpha: 0.78)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Personal de la sede',
+            style: TextStyle(
+              color: _ink,
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Resumen rapido del personal registrado en Matriz.',
+            style: TextStyle(
+              color: _muted,
+              fontSize: 14,
+              height: 1.5,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 18),
+          Wrap(
+            spacing: 14,
+            runSpacing: 14,
+            children: [
+              _buildMiniMetric(
+                'Docentes',
+                '$docentes',
+                Icons.school_outlined,
+                _primary,
+              ),
+              _buildMiniMetric(
+                'Personal administrativo',
+                '$administrativos',
+                Icons.badge_outlined,
+                _secondary,
+              ),
+              _buildMiniMetric(
+                'Total',
+                '$total',
+                Icons.groups_2_outlined,
+                const Color(0xFF7DA49C),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRecentLatePanel(
+    List<QueryDocumentSnapshot> docs,
+    Set<String> nombresPermitidos,
+  ) {
+    final atrasos =
+        docs.where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          return _belongsToTrackedUser(data, nombresPermitidos) &&
+              _normalize(data['estado']) == 'atraso';
+        }).toList()..sort((a, b) {
+          final fechaA =
+              ((a.data() as Map<String, dynamic>)['fecha'] as Timestamp?)
+                  ?.toDate();
+          final fechaB =
+              ((b.data() as Map<String, dynamic>)['fecha'] as Timestamp?)
+                  ?.toDate();
+          return (fechaB ?? DateTime(2000)).compareTo(
+            fechaA ?? DateTime(2000),
           );
+        });
 
-          return StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance
-                .collection('asistencias_realizadas')
-                .snapshots(),
-            builder: (context, asistenciasSnapshot) {
-              final asistencias = asistenciasSnapshot.data?.docs ?? const [];
-              final count = countBuilder(asistencias, nombresPermitidos);
-              final cargando =
-                  usuariosSnapshot.connectionState == ConnectionState.waiting ||
-                  asistenciasSnapshot.connectionState ==
-                      ConnectionState.waiting;
+    final recientes = atrasos.take(5).toList();
 
-              return AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeOut,
-                padding: const EdgeInsets.all(22),
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: _accent.withValues(alpha: 0.58)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Alertas de atrasos',
+            style: TextStyle(
+              color: _ink,
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Ultimos ${recientes.length} registros con atraso detectados en matriz.',
+            style: const TextStyle(
+              color: _muted,
+              fontSize: 13,
+              height: 1.5,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 16),
+          if (recientes.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: _soft,
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: const Text(
+                'No hay atrasos registrados para matriz por el momento.',
+                style: TextStyle(
+                  color: _muted,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            )
+          else
+            ...recientes.map((doc) {
+              final data = doc.data() as Map<String, dynamic>;
+              final fecha = (data['fecha'] as Timestamp?)?.toDate();
+              return Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: _card,
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: color.withValues(alpha: 0.14)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: color.withValues(alpha: 0.08),
-                      blurRadius: 20,
-                      offset: const Offset(0, 8),
-                    ),
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.03),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
+                  color: _soft,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: _accent.withValues(alpha: 0.38),
+                  ),
                 ),
                 child: Row(
                   children: [
                     Container(
-                      width: 52,
-                      height: 52,
+                      width: 42,
+                      height: 42,
                       decoration: BoxDecoration(
-                        color: color.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: color.withValues(alpha: 0.18),
-                        ),
+                        color: _danger.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(14),
                       ),
-                      child: Icon(icon, color: color),
+                      child: const Icon(
+                        Icons.timer_off_outlined,
+                        color: _danger,
+                      ),
                     ),
-                    const SizedBox(width: 16),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            title,
+                            (data['docente'] ?? 'Sin nombre').toString(),
+                            style: const TextStyle(
+                              color: _ink,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            fecha == null
+                                ? 'Fecha no disponible'
+                                : DateFormat(
+                                    "d 'de' MMMM 'de' yyyy",
+                                    'es_ES',
+                                  ).format(fecha),
                             style: const TextStyle(
                               color: _muted,
                               fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.2,
                             ),
                           ),
-                          const SizedBox(height: 6),
-                          cargando
-                              ? Container(
-                                  width: 60,
-                                  height: 28,
-                                  decoration: BoxDecoration(
-                                    color: _soft,
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                )
-                              : Text(
-                                  '$count',
-                                  style: const TextStyle(
-                                    color: _ink,
-                                    fontSize: 30,
-                                    fontWeight: FontWeight.w800,
-                                    height: 1.0,
-                                  ),
-                                ),
                         ],
                       ),
                     ),
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: cargando
-                            ? Colors.grey.shade300
-                            : color.withValues(alpha: 0.60),
+                    const SizedBox(width: 12),
+                    Text(
+                      (data['hora_marcada'] ?? '--:--').toString(),
+                      style: const TextStyle(
+                        color: _danger,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
                   ],
                 ),
               );
-            },
-          );
-        },
+            }),
+        ],
       ),
-    );
-  }
-
-  Widget _buildRoleBreakdownPanel() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance.collection('usuarios').snapshots(),
-      builder: (context, snapshot) {
-        final docs = snapshot.data?.docs ?? const [];
-        final docentes = docs.where((doc) {
-          final data = doc.data() as Map<String, dynamic>;
-          return SedeAccess.matchesSede(data, SedeAccess.matrizId) &&
-              _matchesRole(data, 'Docente');
-        }).length;
-        final administrativos = docs.where((doc) {
-          final data = doc.data() as Map<String, dynamic>;
-          return SedeAccess.matchesSede(data, SedeAccess.matrizId) &&
-              _matchesRole(data, 'Administrativo');
-        }).length;
-        final total = docentes + administrativos;
-
-        return Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: _card,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: _accent.withValues(alpha: 0.78)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Personal de la sede',
-                style: TextStyle(
-                  color: _ink,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Resumen rapido del personal registrado en Matriz.',
-                style: TextStyle(
-                  color: _muted,
-                  fontSize: 14,
-                  height: 1.5,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 18),
-              Wrap(
-                spacing: 14,
-                runSpacing: 14,
-                children: [
-                  _buildMiniMetric(
-                    'Docentes',
-                    '$docentes',
-                    Icons.school_outlined,
-                    _primary,
-                  ),
-                  _buildMiniMetric(
-                    'Personal administrativo',
-                    '$administrativos',
-                    Icons.badge_outlined,
-                    _secondary,
-                  ),
-                  _buildMiniMetric(
-                    'Total',
-                    '$total',
-                    Icons.groups_2_outlined,
-                    const Color(0xFF7DA49C),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildRecentLatePanel() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance.collection('usuarios').snapshots(),
-      builder: (context, usuariosSnapshot) {
-        final nombresPermitidos = _buildAllowedNames(
-          usuariosSnapshot.data?.docs ?? const [],
-        );
-
-        return StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection('asistencias_realizadas')
-              .snapshots(),
-          builder: (context, asistenciasSnapshot) {
-            final docs = asistenciasSnapshot.data?.docs ?? const [];
-            final atrasos =
-                docs.where((doc) {
-                  final data = doc.data() as Map<String, dynamic>;
-                  return _belongsToTrackedUser(data, nombresPermitidos) &&
-                      _normalize(data['estado']) == 'atraso';
-                }).toList()..sort((a, b) {
-                  final fechaA =
-                      ((a.data() as Map<String, dynamic>)['fecha']
-                              as Timestamp?)
-                          ?.toDate();
-                  final fechaB =
-                      ((b.data() as Map<String, dynamic>)['fecha']
-                              as Timestamp?)
-                          ?.toDate();
-                  return (fechaB ?? DateTime(2000)).compareTo(
-                    fechaA ?? DateTime(2000),
-                  );
-                });
-
-            final recientes = atrasos.take(5).toList();
-
-            return Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: _accent.withValues(alpha: 0.45)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Alertas de atrasos',
-                    style: TextStyle(
-                      color: _ink,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Ultimos ${recientes.length} registros con atraso detectados en matriz.',
-                    style: const TextStyle(
-                      color: _muted,
-                      fontSize: 13,
-                      height: 1.5,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  if (recientes.isEmpty)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: _soft,
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      child: const Text(
-                        'No hay atrasos registrados para matriz por el momento.',
-                        style: TextStyle(
-                          color: _muted,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    )
-                  else
-                    ...recientes.map((doc) {
-                      final data = doc.data() as Map<String, dynamic>;
-                      final fecha = (data['fecha'] as Timestamp?)?.toDate();
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: _soft,
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(
-                            color: _accent.withValues(alpha: 0.25),
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 42,
-                              height: 42,
-                              decoration: BoxDecoration(
-                                color: _danger.withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                              child: const Icon(
-                                Icons.timer_off_outlined,
-                                color: _danger,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    (data['docente'] ?? 'Sin nombre')
-                                        .toString(),
-                                    style: const TextStyle(
-                                      color: _ink,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    fecha == null
-                                        ? 'Fecha no disponible'
-                                        : DateFormat(
-                                            "d 'de' MMMM 'de' yyyy",
-                                            'es_ES',
-                                          ).format(fecha),
-                                    style: const TextStyle(
-                                      color: _muted,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Text(
-                              (data['hora_marcada'] ?? '--:--').toString(),
-                              style: const TextStyle(
-                                color: _danger,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }),
-                ],
-              ),
-            );
-          },
-        );
-      },
     );
   }
 
@@ -617,7 +492,7 @@ class DashboardAdminWeb extends StatelessWidget {
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.07),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.18)),
+        border: Border.all(color: color.withValues(alpha: 0.30)),
         boxShadow: [
           BoxShadow(
             color: color.withValues(alpha: 0.06),

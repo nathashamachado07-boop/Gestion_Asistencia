@@ -449,6 +449,7 @@ class _SolicitudFormScreenState extends State<SolicitudFormScreen> {
                   MaterialPageRoute(
                     builder: (context) => HistorialSolicitudesScreen(
                       nombreDocente: widget.nombreDocente,
+                      correoUsuario: widget.correoUsuario,
                       sedeId: _branding.sedeId,
                     ),
                   ),
@@ -538,7 +539,7 @@ class _SolicitudFormScreenState extends State<SolicitudFormScreen> {
                                   borderRadius: BorderRadius.circular(15),
                                   border: Border.all(
                                     color: _isWebLayout
-                                        ? const Color(0xFF4D7374)
+                                        ? const Color(0xFF365B5C)
                                         : Colors.white,
                                     width: _isWebLayout ? 1.4 : 2,
                                   ),
@@ -686,7 +687,7 @@ class _SolicitudFormScreenState extends State<SolicitudFormScreen> {
                         foregroundColor: _branding.primary,
                         backgroundColor: Colors.white,
                         side: BorderSide(
-                          color: _branding.primary.withValues(alpha: 0.20),
+                          color: _branding.primary.withValues(alpha: 0.32),
                         ),
                         padding: const EdgeInsets.symmetric(
                           horizontal: 18,
@@ -738,7 +739,7 @@ class _SolicitudFormScreenState extends State<SolicitudFormScreen> {
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(15),
                               border: Border.all(
-                                color: const Color(0xFF4D7374),
+                                color: const Color(0xFF365B5C),
                                 width: 1.4,
                               ),
                             ),
@@ -839,6 +840,7 @@ class _SolicitudFormScreenState extends State<SolicitudFormScreen> {
       MaterialPageRoute(
         builder: (context) => HistorialSolicitudesScreen(
           nombreDocente: _nombreController.text,
+          correoUsuario: widget.correoUsuario,
           sedeId: _branding.sedeId,
         ),
       ),
@@ -864,7 +866,7 @@ class _SolicitudFormScreenState extends State<SolicitudFormScreen> {
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(15),
         borderSide: BorderSide(
-          color: _isWebLayout ? const Color(0xFF4D7374) : Colors.white,
+          color: _isWebLayout ? const Color(0xFF365B5C) : Colors.white,
           width: _isWebLayout ? 1.4 : 2,
         ),
       ),
@@ -972,6 +974,7 @@ class _SolicitudFormScreenState extends State<SolicitudFormScreen> {
                       MaterialPageRoute(
                         builder: (context) => HistorialSolicitudesScreen(
                           nombreDocente: _nombreController.text,
+                          correoUsuario: widget.correoUsuario,
                           sedeId: _branding.sedeId,
                         ),
                       ),
@@ -1194,7 +1197,7 @@ class _SolicitudFormScreenState extends State<SolicitudFormScreen> {
             color: Colors.white.withValues(alpha: 0.72),
             borderRadius: BorderRadius.circular(18),
             border: Border.all(
-              color: _branding.primary.withValues(alpha: 0.12),
+              color: _branding.primary.withValues(alpha: 0.32),
             ),
           ),
           child: Column(

@@ -238,7 +238,11 @@ class FirebaseService {
         },
         body: jsonEncode(payload),
       );
-    } catch (_) {
+    } catch (error) {
+      debugPrint(
+        '_callSecureFunction fallo en $functionName '
+        '(payloadKeys=${payload.keys.join(",")}): $error',
+      );
       throw Exception(
         'No se pudo conectar con el servicio seguro. Recarga la pagina e intenta nuevamente.',
       );
@@ -251,7 +255,11 @@ class FirebaseService {
         if (decoded is Map<String, dynamic>) {
           body = decoded;
         }
-      } catch (_) {
+      } catch (error) {
+        debugPrint(
+          '_callSecureFunction recibio JSON invalido en $functionName '
+          '(status=${response.statusCode}): $error',
+        );
         body = const {};
       }
     }
@@ -855,7 +863,11 @@ class FirebaseService {
 
     try {
       return base64Decode(base64Value);
-    } catch (_) {
+    } catch (error) {
+      debugPrint(
+        'extraerBytesDocumentoPdfFinalSolicitud fallo al decodificar base64 '
+        '(base64Length=${base64Value.length}): $error',
+      );
       return null;
     }
   }
@@ -2343,13 +2355,14 @@ class FirebaseService {
 
   Future<Map<String, String>?> _obtenerPermisoAprobadoVigente({
     required String nombreUsuario,
+    String? correoUsuario,
     required DateTime ahora,
     required int ahoraMin,
     String? sedeId,
   }) async {
+    final correoNormalizado = _normalizarCorreo(correoUsuario ?? '');
     Query<Map<String, dynamic>> query = _db
         .collection('solicitudes')
-        .where('colaborador', isEqualTo: nombreUsuario)
         .where('tipo', isEqualTo: 'Permiso')
         .where('estado', isEqualTo: 'aprobado');
 
@@ -2357,7 +2370,17 @@ class FirebaseService {
       query = query.where('sedeId', isEqualTo: sedeId.trim());
     }
 
-    final snapshot = await query.get();
+    QuerySnapshot<Map<String, dynamic>> snapshot;
+    if (correoNormalizado.isNotEmpty) {
+      snapshot = await query
+          .where('colaboradorCorreo', isEqualTo: correoNormalizado)
+          .get();
+      if (snapshot.docs.isEmpty) {
+        snapshot = await query.where('colaborador', isEqualTo: nombreUsuario).get();
+      }
+    } else {
+      snapshot = await query.where('colaborador', isEqualTo: nombreUsuario).get();
+    }
 
     for (final doc in snapshot.docs) {
       final data = doc.data();
@@ -2388,8 +2411,101 @@ class FirebaseService {
     return null;
   }
 
+  String _segmentoDocIdSeguro(dynamic value, {String fallback = 'general'}) {
+    final limpio = value?.toString().trim().toLowerCase() ?? '';
+    final normalizado = limpio.replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+    final compacto = normalizado.replaceAll(RegExp(r'_+'), '_').replaceAll(
+      RegExp(r'^_|_$'),
+      '',
+    );
+    return compacto.isEmpty ? fallback : compacto;
+  }
+
+  String _claveIdentidadRegistro({
+    required String nombreUsuario,
+    String? correoUsuario,
+  }) {
+    final correoNormalizado = _normalizarCorreo(correoUsuario ?? '');
+    if (correoNormalizado.isNotEmpty) {
+      return _segmentoDocIdSeguro(correoNormalizado, fallback: 'usuario');
+    }
+    return _segmentoDocIdSeguro(nombreUsuario, fallback: 'usuario');
+  }
+
+  String _claveFechaRegistro(DateTime fecha) {
+    return DateFormat('yyyyMMdd').format(fecha);
+  }
+
+  String _docIdMarcacion({
+    required String nombreUsuario,
+    String? correoUsuario,
+    required DateTime fecha,
+    required bool esEntrada,
+    required String horarioClave,
+    String? tipoVinculacion,
+  }) {
+    final identidad = _claveIdentidadRegistro(
+      nombreUsuario: nombreUsuario,
+      correoUsuario: correoUsuario,
+    );
+    final fechaClave = _claveFechaRegistro(fecha);
+    final tipoClave = esEntrada ? 'entrada' : 'salida';
+    final horarioSegmento = _segmentoDocIdSeguro(horarioClave);
+    final vinculacionSegmento = _segmentoDocIdSeguro(
+      tipoVinculacion,
+      fallback: 'general',
+    );
+    return 'marcacion_${identidad}_${fechaClave}_${tipoClave}_${horarioSegmento}_$vinculacionSegmento';
+  }
+
+  String _docIdAlmuerzo({
+    required String correoUsuario,
+    String? nombreUsuario,
+    required DateTime fecha,
+  }) {
+    final identidad = _claveIdentidadRegistro(
+      nombreUsuario: nombreUsuario ?? correoUsuario,
+      correoUsuario: correoUsuario,
+    );
+    return 'almuerzo_${identidad}_${_claveFechaRegistro(fecha)}';
+  }
+
+  Future<void> _guardarMarcacionIdempotente({
+    required String nombreUsuario,
+    String? correoUsuario,
+    required DateTime fecha,
+    required bool esEntrada,
+    required String horarioClave,
+    String? tipoVinculacion,
+    required Map<String, dynamic> payload,
+  }) async {
+    final docId = _docIdMarcacion(
+      nombreUsuario: nombreUsuario,
+      correoUsuario: correoUsuario,
+      fecha: fecha,
+      esEntrada: esEntrada,
+      horarioClave: horarioClave,
+      tipoVinculacion: tipoVinculacion,
+    );
+    final ref = _db.collection('asistencias_realizadas').doc(docId);
+
+    await _db.runTransaction((transaction) async {
+      final snapshot = await transaction.get(ref);
+      if (snapshot.exists) {
+        return;
+      }
+
+      transaction.set(ref, {
+        ...payload,
+        'registro_estable': true,
+        'idempotencyKey': docId,
+      }, SetOptions(merge: true));
+    });
+  }
+
   Future<Map<String, String>> registrarMarcacion({
     required String nombreUsuario,
+    String? correoUsuario,
     required List<dynamic> listaHorarios,
     required bool esEntrada,
     String? sedeId,
@@ -2400,14 +2516,33 @@ class FirebaseService {
     // await _validarUbicacionGPS(); // Descomentar cuando se requiera GPS real
 
     DateTime ahora = DateTime.now();
+    final correoNormalizado = _normalizarCorreo(correoUsuario ?? '');
 
     // 1. VALIDACIÓN DE DUPLICADOS
-    QuerySnapshot ultimoRegistroQuery = await _db
-        .collection('asistencias_realizadas')
-        .where('docente', isEqualTo: nombreUsuario)
-        .orderBy('fecha', descending: true)
-        .limit(1)
-        .get();
+    QuerySnapshot ultimoRegistroQuery;
+    if (correoNormalizado.isNotEmpty) {
+      ultimoRegistroQuery = await _db
+          .collection('asistencias_realizadas')
+          .where('correo_usuario', isEqualTo: correoNormalizado)
+          .orderBy('fecha', descending: true)
+          .limit(1)
+          .get();
+      if (ultimoRegistroQuery.docs.isEmpty) {
+        ultimoRegistroQuery = await _db
+            .collection('asistencias_realizadas')
+            .where('docente', isEqualTo: nombreUsuario)
+            .orderBy('fecha', descending: true)
+            .limit(1)
+            .get();
+      }
+    } else {
+      ultimoRegistroQuery = await _db
+          .collection('asistencias_realizadas')
+          .where('docente', isEqualTo: nombreUsuario)
+          .orderBy('fecha', descending: true)
+          .limit(1)
+          .get();
+    }
 
     Map<String, dynamic>? ultimoDoc;
     String ultimoTipo = '';
@@ -2443,6 +2578,7 @@ class FirebaseService {
       final ahoraMin = (ahora.hour * 60) + ahora.minute;
       final permisoActivoFuture = _obtenerPermisoAprobadoVigente(
         nombreUsuario: nombreUsuario,
+        correoUsuario: correoUsuario,
         ahora: ahora,
         ahoraMin: ahoraMin,
         sedeId: sedeId,
@@ -2627,8 +2763,9 @@ class FirebaseService {
                 .toString()
                 .trim();
 
-      await _db.collection('asistencias_realizadas').add({
+      final payload = {
         'docente': nombreUsuario,
+        'correo_usuario': correoNormalizado,
         'tipo': esEntrada ? 'ENTRADA' : 'SALIDA',
         'horario_ref': horarioSeleccionado['nombre'],
         'horario_id': (horarioSeleccionado['horarioId'] ?? '')
@@ -2678,7 +2815,20 @@ class FirebaseService {
         'permiso_horario': permisoActivo?['horario'],
         'permiso_motivo': permisoActivo?['motivo'],
         'permiso_documento_id': permisoActivo?['documentoId'],
-      });
+      };
+
+      await _guardarMarcacionIdempotente(
+        nombreUsuario: nombreUsuario,
+        correoUsuario: correoUsuario,
+        fecha: ahora,
+        esEntrada: esEntrada,
+        horarioClave: (horarioSeleccionado['horarioId'] ??
+                horarioSeleccionado['nombre'] ??
+                'general')
+            .toString(),
+        tipoVinculacion: tipoVinculacion,
+        payload: payload,
+      );
 
       return {
         'estado': estadoVisible,
@@ -2703,6 +2853,7 @@ class FirebaseService {
     final List<Map<String, dynamic>> horariosEvaluados = [];
     final permisoActivoFuture = _obtenerPermisoAprobadoVigente(
       nombreUsuario: nombreUsuario,
+      correoUsuario: correoUsuario,
       ahora: ahora,
       ahoraMin: ahoraMin,
       sedeId: sedeId,
@@ -2879,8 +3030,9 @@ class FirebaseService {
         : '$horaEntradaAplicada a $horaSalidaAplicada';
 
     // 3. GUARDAR REGISTRO
-    await _db.collection('asistencias_realizadas').add({
+    final payload = {
       'docente': nombreUsuario,
+      'correo_usuario': correoNormalizado,
       'tipo': esEntrada ? "ENTRADA" : "SALIDA",
       'horario_ref': horarioSeleccionado['nombre'],
       'hora_marcada': horaActualStr,
@@ -2912,7 +3064,18 @@ class FirebaseService {
       'permiso_horario': permisoActivo?['horario'],
       'permiso_motivo': permisoActivo?['motivo'],
       'permiso_documento_id': permisoActivo?['documentoId'],
-    });
+    };
+
+    await _guardarMarcacionIdempotente(
+      nombreUsuario: nombreUsuario,
+      correoUsuario: correoUsuario,
+      fecha: ahora,
+      esEntrada: esEntrada,
+      horarioClave:
+          (horarioSeleccionado['horarioId'] ?? horarioSeleccionado['nombre'] ?? 'general')
+              .toString(),
+      payload: payload,
+    );
 
     return {
       'estado': estado,
@@ -2931,13 +3094,31 @@ class FirebaseService {
 
   Future<List<Map<String, dynamic>>> obtenerHistorialAsistencias(
     String nombreDocente,
+    {String? correoUsuario}
   ) async {
     try {
-      QuerySnapshot snapshot = await _db
-          .collection('asistencias_realizadas')
-          .where('docente', isEqualTo: nombreDocente)
-          .orderBy('fecha', descending: true)
-          .get();
+      final correoNormalizado = _normalizarCorreo(correoUsuario ?? '');
+      QuerySnapshot snapshot;
+      if (correoNormalizado.isNotEmpty) {
+        snapshot = await _db
+            .collection('asistencias_realizadas')
+            .where('correo_usuario', isEqualTo: correoNormalizado)
+            .orderBy('fecha', descending: true)
+            .get();
+        if (snapshot.docs.isEmpty) {
+          snapshot = await _db
+              .collection('asistencias_realizadas')
+              .where('docente', isEqualTo: nombreDocente)
+              .orderBy('fecha', descending: true)
+              .get();
+        }
+      } else {
+        snapshot = await _db
+            .collection('asistencias_realizadas')
+            .where('docente', isEqualTo: nombreDocente)
+            .orderBy('fecha', descending: true)
+            .get();
+      }
 
       return snapshot.docs.map((doc) {
         var data = doc.data() as Map<String, dynamic>;
@@ -2945,6 +3126,10 @@ class FirebaseService {
         return data;
       }).toList();
     } catch (e) {
+      debugPrint(
+        'obtenerHistorialAsistencias fallo '
+        '(nombre=$nombreDocente, correo=${_normalizarCorreo(correoUsuario ?? "")}): $e',
+      );
       return [];
     }
   }
@@ -2965,6 +3150,9 @@ class FirebaseService {
         return data;
       }).toList();
     } catch (e) {
+      debugPrint(
+        'obtenerHistorialAlmuerzo fallo (correo=${_normalizarCorreo(correo)}): $e',
+      );
       return [];
     }
   }
@@ -2997,19 +3185,38 @@ class FirebaseService {
         return _sanitizarDatosUsuario(perfilDoc.data() as Map<String, dynamic>);
       }
     } catch (e) {
-      debugPrint("Error al obtener perfil: $e");
+      debugPrint(
+        'obtenerDatosPerfil fallo '
+        '(correo=${_normalizarCorreo(correo)}, sedeId=${SedeAccess.normalize(sedeId)}): $e',
+      );
     }
     return null;
   }
 
   Future<Map<String, int>> obtenerEstadisticasDocente(
     String nombre, {
+    String? correoUsuario,
     String mes = "Todos",
   }) async {
-    final snapshot = await _db
-        .collection('asistencias_realizadas')
-        .where('docente', isEqualTo: nombre)
-        .get();
+    final correoNormalizado = _normalizarCorreo(correoUsuario ?? '');
+    QuerySnapshot snapshot;
+    if (correoNormalizado.isNotEmpty) {
+      snapshot = await _db
+          .collection('asistencias_realizadas')
+          .where('correo_usuario', isEqualTo: correoNormalizado)
+          .get();
+      if (snapshot.docs.isEmpty) {
+        snapshot = await _db
+            .collection('asistencias_realizadas')
+            .where('docente', isEqualTo: nombre)
+            .get();
+      }
+    } else {
+      snapshot = await _db
+          .collection('asistencias_realizadas')
+          .where('docente', isEqualTo: nombre)
+          .get();
+    }
 
     final docs = snapshot.docs
         .map((doc) => doc.data())
@@ -3087,32 +3294,66 @@ class FirebaseService {
       throw Exception("Los docentes de Tiempo Parcial no registran almuerzo.");
     }
 
-    String fechaHoy = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    String horaActual = DateFormat('HH:mm:ss').format(DateTime.now());
+    final ahora = DateTime.now();
+    String fechaHoy = DateFormat('yyyy-MM-dd').format(ahora);
+    String horaActual = DateFormat('HH:mm:ss').format(ahora);
 
-    // Al usar .add(), Firebase crea la colección 'registros_almuerzo' automáticamente si no existe
-    await _db.collection('registros_almuerzo').add({
-      'correo_usuario': correo,
-      'nombre_usuario': usuarioData?['nombre'],
-      'fecha': fechaHoy,
-      'hora_salida': horaActual,
-      'hora_regreso': "--:--",
-      'estado': "en_almuerzo",
-      'sedeId': usuarioData?['sedeId'],
-      'sede': usuarioData?['sede'],
-      'tipo_horario': usuarioData?['tipo_horario'],
-      'almuerzo_horario': horarioAlmuerzo?['label'],
-      'almuerzo_inicio_asignado': horarioAlmuerzo?['inicio'],
-      'almuerzo_fin_asignado': horarioAlmuerzo?['fin'],
-      'timestamp':
-          FieldValue.serverTimestamp(), // Añadido para mejor ordenamiento
+    final legacyActivo = await _db
+        .collection('registros_almuerzo')
+        .where('correo_usuario', isEqualTo: correo)
+        .where('fecha', isEqualTo: fechaHoy)
+        .where('estado', isEqualTo: "en_almuerzo")
+        .limit(1)
+        .get();
+    if (legacyActivo.docs.isNotEmpty) {
+      return;
+    }
+
+    final docId = _docIdAlmuerzo(
+      correoUsuario: correo,
+      nombreUsuario: usuarioData?['nombre']?.toString(),
+      fecha: ahora,
+    );
+    final ref = _db.collection('registros_almuerzo').doc(docId);
+
+    await _db.runTransaction((transaction) async {
+      final snapshot = await transaction.get(ref);
+      if (snapshot.exists) {
+        final data = snapshot.data() ?? {};
+        final estadoActual = (data['estado'] ?? '').toString().trim();
+        if (estadoActual == 'en_almuerzo') {
+          return;
+        }
+        if (estadoActual == 'finalizado') {
+          throw Exception("Ya registraste tu almuerzo de hoy.");
+        }
+      }
+
+      transaction.set(ref, {
+        'correo_usuario': correo,
+        'nombre_usuario': usuarioData?['nombre'],
+        'fecha': fechaHoy,
+        'hora_salida': horaActual,
+        'hora_regreso': "--:--",
+        'estado': "en_almuerzo",
+        'sedeId': usuarioData?['sedeId'],
+        'sede': usuarioData?['sede'],
+        'tipo_horario': usuarioData?['tipo_horario'],
+        'almuerzo_horario': horarioAlmuerzo?['label'],
+        'almuerzo_inicio_asignado': horarioAlmuerzo?['inicio'],
+        'almuerzo_fin_asignado': horarioAlmuerzo?['fin'],
+        'timestamp': FieldValue.serverTimestamp(),
+        'registro_estable': true,
+        'idempotencyKey': docId,
+      }, SetOptions(merge: true));
     });
   }
 
   // Registrar regreso del almuerzo
   Future<void> registrarFinAlmuerzo(String correo) async {
-    String fechaHoy = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    String horaActual = DateFormat('HH:mm:ss').format(DateTime.now());
+    final ahora = DateTime.now();
+    String fechaHoy = DateFormat('yyyy-MM-dd').format(ahora);
+    String horaActual = DateFormat('HH:mm:ss').format(ahora);
     QuerySnapshot userCheck = await _db
         .collection('usuarios')
         .where('correo', isEqualTo: correo)
@@ -3122,6 +3363,45 @@ class FirebaseService {
 
     if (userCheck.docs.isNotEmpty) {
       usuarioData = userCheck.docs.first.data() as Map<String, dynamic>;
+    }
+
+    final docId = _docIdAlmuerzo(
+      correoUsuario: correo,
+      nombreUsuario: usuarioData?['nombre']?.toString(),
+      fecha: ahora,
+    );
+    final ref = _db.collection('registros_almuerzo').doc(docId);
+    var actualizado = false;
+
+    await _db.runTransaction((transaction) async {
+      final snapshot = await transaction.get(ref);
+      if (!snapshot.exists) {
+        return;
+      }
+
+      final data = snapshot.data() ?? {};
+      final estadoActual = (data['estado'] ?? '').toString().trim();
+      if (estadoActual == 'finalizado') {
+        actualizado = true;
+        return;
+      }
+      if (estadoActual != 'en_almuerzo') {
+        return;
+      }
+
+      transaction.update(ref, {
+        'hora_regreso': horaActual,
+        'estado': "finalizado",
+        'nombre_usuario': usuarioData?['nombre'],
+        'sedeId': usuarioData?['sedeId'],
+        'sede': usuarioData?['sede'],
+        'tipo_horario': usuarioData?['tipo_horario'],
+      });
+      actualizado = true;
+    });
+
+    if (actualizado) {
+      return;
     }
 
     var query = await _db
@@ -3141,9 +3421,10 @@ class FirebaseService {
         'sede': usuarioData?['sede'],
         'tipo_horario': usuarioData?['tipo_horario'],
       });
-    } else {
-      throw Exception("No se encontró un inicio de almuerzo activo.");
+      return;
     }
+
+    throw Exception("No se encontró un inicio de almuerzo activo.");
   }
 
   // ==========================================
@@ -3235,11 +3516,6 @@ class FirebaseService {
 
       await nuevaSolicitudRef.set(payload);
 
-      await reenumerarSolicitudesPorGrupo(
-        tipoSolicitud: tipoSolicitud,
-        sedeId: sedeSolicitud,
-      );
-
       await _crearAvisosNuevaSolicitudRRHH(
         idDoc: nuevaSolicitudRef.id,
         solicitud: solicitud,
@@ -3258,17 +3534,10 @@ class FirebaseService {
     final solicitudRef = _db.collection('solicitudes').doc(idDoc);
 
     try {
-      final solicitudSnapshot = await solicitudRef.get();
-      final solicitudData = solicitudSnapshot.data() ?? data;
-      final tipoSolicitud = _resolverTipoSolicitud(solicitudData['tipo']);
-      final sedeSolicitud = _resolverSedeSolicitud(solicitudData['sedeId']);
-      await reenumerarSolicitudesPorGrupo(
-        tipoSolicitud: tipoSolicitud,
-        sedeId: sedeSolicitud,
+      return await _asegurarNumeroFormularioEnSolicitudRef(
+        solicitudRef,
+        fallbackData: data,
       );
-
-      final solicitudActualizada = await solicitudRef.get();
-      return solicitudActualizada.data() ?? solicitudData;
     } catch (e) {
       throw Exception("Error al generar el numero del formulario: $e");
     }
@@ -3313,6 +3582,65 @@ class FirebaseService {
     return numero.toString().padLeft(5, '0');
   }
 
+  String _slugNumeroFormulario(String value) {
+    final limpio = value.trim().toLowerCase().replaceAll(
+      RegExp(r'[^a-z0-9]+'),
+      '_',
+    );
+    return limpio.isEmpty ? 'solicitud' : limpio.replaceAll(RegExp(r'_+'), '_');
+  }
+
+  DocumentReference<Map<String, dynamic>> _contadorSolicitudesRef({
+    required String tipoSolicitud,
+    required String sedeId,
+  }) {
+    final sedeNormalizada = _resolverSedeSolicitud(sedeId);
+    final tipoNormalizado = _resolverTipoSolicitud(tipoSolicitud);
+    final docId =
+        'solicitudes_${_slugNumeroFormulario(sedeNormalizada)}_${_slugNumeroFormulario(tipoNormalizado)}';
+    return _db.collection('_counters').doc(docId);
+  }
+
+  int? _leerSecuenciaFormulario(Map<String, dynamic>? data) {
+    if (data == null) {
+      return null;
+    }
+    final secuencia = (data['numFormularioSecuencia'] as num?)?.toInt();
+    if (secuencia != null && secuencia > 0) {
+      return secuencia;
+    }
+
+    final numero = (data['numFormulario'] ?? '').toString().trim();
+    final numeroParseado = int.tryParse(numero);
+    if (numeroParseado != null && numeroParseado > 0) {
+      return numeroParseado;
+    }
+    return null;
+  }
+
+  bool _tieneNumeracionFormularioValida(
+    Map<String, dynamic>? data, {
+    required String tipoSolicitud,
+    required String sedeId,
+  }) {
+    if (data == null) {
+      return false;
+    }
+
+    final secuencia = _leerSecuenciaFormulario(data);
+    if (secuencia == null) {
+      return false;
+    }
+
+    final numeroActual = (data['numFormulario'] ?? '').toString().trim();
+    final tipoActual = _resolverTipoSolicitud(data['numFormularioTipo']);
+    final sedeActual = _resolverSedeSolicitud(data['numFormularioSedeId']);
+
+    return numeroActual == _formatearNumeroFormulario(secuencia) &&
+        tipoActual == tipoSolicitud &&
+        sedeActual == sedeId;
+  }
+
   DateTime _resolverFechaOrdenSolicitud(Map<String, dynamic> data) {
     final fecha =
         data['fecha_solicitud'] ??
@@ -3339,13 +3667,149 @@ class FirebaseService {
     required String tipoSolicitud,
     required String sedeId,
   }) async {
-    final snapshot = await _db
+    final tipoNormalizado = _resolverTipoSolicitud(tipoSolicitud);
+    final sedeNormalizada = _resolverSedeSolicitud(sedeId);
+    final maximoExistente = await _obtenerMaxNumeroFormularioExistente(
+      tipoSolicitud: tipoNormalizado,
+      sedeId: sedeNormalizada,
+    );
+    final contadorRef = _contadorSolicitudesRef(
+      tipoSolicitud: tipoNormalizado,
+      sedeId: sedeNormalizada,
+    );
+
+    return _db.runTransaction<int>((transaction) async {
+      final counterSnapshot = await transaction.get(contadorRef);
+      final actualCounter =
+          (counterSnapshot.data()?['ultimoNumero'] as num?)?.toInt() ?? 0;
+      final baseActual = max(actualCounter, maximoExistente);
+      final siguiente = baseActual + 1;
+
+      transaction.set(contadorRef, {
+        'ultimoNumero': siguiente,
+        'tipoSolicitud': tipoNormalizado,
+        'sedeId': sedeNormalizada,
+        'actualizadoEn': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      return siguiente;
+    });
+  }
+
+  Future<int> _obtenerMaxNumeroFormularioExistente({
+    required String tipoSolicitud,
+    required String sedeId,
+  }) async {
+    final snapshotSecuencia = await _db
         .collection('solicitudes')
         .where('tipo', isEqualTo: tipoSolicitud)
         .where('sedeId', isEqualTo: sedeId)
+        .orderBy('numFormularioSecuencia', descending: true)
+        .limit(1)
         .get();
 
-    return snapshot.docs.length + 1;
+    final maximoPorSecuencia = snapshotSecuencia.docs.isEmpty
+        ? 0
+        : (_leerSecuenciaFormulario(snapshotSecuencia.docs.first.data()) ?? 0);
+    if (maximoPorSecuencia > 0) {
+      return maximoPorSecuencia;
+    }
+
+    final snapshotNumero = await _db
+        .collection('solicitudes')
+        .where('tipo', isEqualTo: tipoSolicitud)
+        .where('sedeId', isEqualTo: sedeId)
+        .orderBy('numFormulario', descending: true)
+        .limit(1)
+        .get();
+
+    if (snapshotNumero.docs.isEmpty) {
+      return 0;
+    }
+
+    return _leerSecuenciaFormulario(snapshotNumero.docs.first.data()) ?? 0;
+  }
+
+  Future<Map<String, dynamic>> _asegurarNumeroFormularioEnSolicitudRef(
+    DocumentReference<Map<String, dynamic>> solicitudRef, {
+    Map<String, dynamic>? fallbackData,
+  }) async {
+    final solicitudSnapshot = await solicitudRef.get();
+    final solicitudBase = solicitudSnapshot.data() ?? fallbackData ?? <String, dynamic>{};
+    final tipoSolicitud = _resolverTipoSolicitud(solicitudBase['tipo']);
+    final sedeSolicitud = _resolverSedeSolicitud(solicitudBase['sedeId']);
+    final maximoExistente = await _obtenerMaxNumeroFormularioExistente(
+      tipoSolicitud: tipoSolicitud,
+      sedeId: sedeSolicitud,
+    );
+    final contadorRef = _contadorSolicitudesRef(
+      tipoSolicitud: tipoSolicitud,
+      sedeId: sedeSolicitud,
+    );
+
+    return _db.runTransaction<Map<String, dynamic>>((transaction) async {
+      final solicitudTxSnapshot = await transaction.get(solicitudRef);
+      final solicitudData =
+          solicitudTxSnapshot.data() ?? fallbackData ?? <String, dynamic>{};
+      final tipoActual = _resolverTipoSolicitud(solicitudData['tipo']);
+      final sedeActual = _resolverSedeSolicitud(solicitudData['sedeId']);
+
+      if (_tieneNumeracionFormularioValida(
+        solicitudData,
+        tipoSolicitud: tipoActual,
+        sedeId: sedeActual,
+      )) {
+        return solicitudData;
+      }
+
+      final secuenciaExistente = _leerSecuenciaFormulario(solicitudData);
+      if (secuenciaExistente != null && secuenciaExistente > 0) {
+        final numeroFormulario = _formatearNumeroFormulario(secuenciaExistente);
+        transaction.set(solicitudRef, {
+          'numFormulario': numeroFormulario,
+          'numFormularioSecuencia': secuenciaExistente,
+          'numFormularioTipo': tipoActual,
+          'numFormularioSedeId': sedeActual,
+        }, SetOptions(merge: true));
+
+        return {
+          ...solicitudData,
+          'numFormulario': numeroFormulario,
+          'numFormularioSecuencia': secuenciaExistente,
+          'numFormularioTipo': tipoActual,
+          'numFormularioSedeId': sedeActual,
+        };
+      }
+
+      final contadorSnapshot = await transaction.get(contadorRef);
+      final actualCounter =
+          (contadorSnapshot.data()?['ultimoNumero'] as num?)?.toInt() ?? 0;
+      final baseActual = max(actualCounter, maximoExistente);
+      final siguiente = baseActual + 1;
+      final numeroFormulario = _formatearNumeroFormulario(siguiente);
+
+      transaction.set(contadorRef, {
+        'ultimoNumero': siguiente,
+        'tipoSolicitud': tipoActual,
+        'sedeId': sedeActual,
+        'actualizadoEn': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      transaction.set(solicitudRef, {
+        'numFormulario': numeroFormulario,
+        'numFormularioSecuencia': siguiente,
+        'numFormularioTipo': tipoActual,
+        'numFormularioSedeId': sedeActual,
+      }, SetOptions(merge: true));
+
+      return {
+        ...solicitudData,
+        'numFormulario': numeroFormulario,
+        'numFormularioSecuencia': siguiente,
+        'numFormularioTipo': tipoActual,
+        'numFormularioSedeId': sedeActual,
+      };
+    });
   }
 
   Future<void> _aplicarNumeracionSecuencialSolicitudesDocs(
@@ -3371,49 +3835,21 @@ class FirebaseService {
       return a.id.compareTo(b.id);
     });
 
-    WriteBatch batch = _db.batch();
-    var operacionesPendientes = 0;
-
-    Future<void> commitBatch() async {
-      if (operacionesPendientes == 0) {
-        return;
-      }
-      await batch.commit();
-      batch = _db.batch();
-      operacionesPendientes = 0;
-    }
-
-    for (var index = 0; index < docs.length; index++) {
-      final doc = docs[index];
+    for (final doc in docs) {
       final data = doc.data() as Map<String, dynamic>;
-      final secuenciaEsperada = index + 1;
-      final numeroEsperado = _formatearNumeroFormulario(secuenciaEsperada);
-      final numeroActual = (data['numFormulario'] ?? '').toString().trim();
-      final secuenciaActual = (data['numFormularioSecuencia'] as num?)?.toInt();
-      final tipoActual = _resolverTipoSolicitud(data['numFormularioTipo']);
-      final sedeActual = _resolverSedeSolicitud(data['numFormularioSedeId']);
-
-      if (numeroActual == numeroEsperado &&
-          secuenciaActual == secuenciaEsperada &&
-          tipoActual == tipoSolicitud &&
-          sedeActual == sedeId) {
+      if (_tieneNumeracionFormularioValida(
+        data,
+        tipoSolicitud: tipoSolicitud,
+        sedeId: sedeId,
+      )) {
         continue;
       }
 
-      batch.set(doc.reference, {
-        'numFormulario': numeroEsperado,
-        'numFormularioSecuencia': secuenciaEsperada,
-        'numFormularioTipo': tipoSolicitud,
-        'numFormularioSedeId': sedeId,
-      }, SetOptions(merge: true));
-      operacionesPendientes++;
-
-      if (operacionesPendientes >= 400) {
-        await commitBatch();
-      }
+      await _asegurarNumeroFormularioEnSolicitudRef(
+        _db.collection('solicitudes').doc(doc.id),
+        fallbackData: data,
+      );
     }
-
-    await commitBatch();
   }
 
   Future<void> reenumerarSolicitudesPorGrupo({
@@ -3469,13 +3905,29 @@ class FirebaseService {
 
   Future<void> sincronizarNumeracionSolicitudesPorColaborador({
     required String nombre,
+    String? correo,
     String? sedeId,
   }) async {
     final sedeFiltro = SedeAccess.normalize(sedeId);
-    final snapshot = await _db
-        .collection('solicitudes')
-        .where('colaborador', isEqualTo: nombre)
-        .get();
+    final correoNormalizado = _normalizarCorreo(correo ?? '');
+    QuerySnapshot<Map<String, dynamic>> snapshot;
+    if (correoNormalizado.isNotEmpty) {
+      snapshot = await _db
+          .collection('solicitudes')
+          .where('colaboradorCorreo', isEqualTo: correoNormalizado)
+          .get();
+      if (snapshot.docs.isEmpty) {
+        snapshot = await _db
+            .collection('solicitudes')
+            .where('colaborador', isEqualTo: nombre)
+            .get();
+      }
+    } else {
+      snapshot = await _db
+          .collection('solicitudes')
+          .where('colaborador', isEqualTo: nombre)
+          .get();
+    }
 
     final grupos = <String>{};
 
@@ -3909,7 +4361,11 @@ class FirebaseService {
             .toString()
             .trim()
             .toLowerCase();
-      } catch (_) {
+      } catch (error) {
+        debugPrint(
+          '_crearAvisosSolicitudAutorizacionFinal no pudo resolver correo destino '
+          '(colaborador=$colaborador, sedeId=$sedeId): $error',
+        );
         correoDestino = '';
       }
     }
@@ -5140,18 +5596,35 @@ class FirebaseService {
 
   Future<List<Solicitud>> obtenerMisSolicitdes(
     String nombre, {
+    String? correo,
     String? sedeId,
   }) async {
     try {
       await sincronizarNumeracionSolicitudesPorColaborador(
         nombre: nombre,
+        correo: correo,
         sedeId: sedeId,
       );
 
-      QuerySnapshot snapshot = await _db
-          .collection('solicitudes')
-          .where('colaborador', isEqualTo: nombre)
-          .get();
+      final correoNormalizado = _normalizarCorreo(correo ?? '');
+      QuerySnapshot snapshot;
+      if (correoNormalizado.isNotEmpty) {
+        snapshot = await _db
+            .collection('solicitudes')
+            .where('colaboradorCorreo', isEqualTo: correoNormalizado)
+            .get();
+        if (snapshot.docs.isEmpty) {
+          snapshot = await _db
+              .collection('solicitudes')
+              .where('colaborador', isEqualTo: nombre)
+              .get();
+        }
+      } else {
+        snapshot = await _db
+            .collection('solicitudes')
+            .where('colaborador', isEqualTo: nombre)
+            .get();
+      }
 
       final sedeFiltro = SedeAccess.normalize(sedeId);
       final docs =
@@ -5184,7 +5657,10 @@ class FirebaseService {
           )
           .toList();
     } catch (e) {
-      debugPrint("Error al obtener solicitudes: $e");
+      debugPrint(
+        'obtenerMisSolicitdes fallo '
+        '(nombre=$nombre, correo=${_normalizarCorreo(correo ?? "")}, sedeId=${SedeAccess.normalize(sedeId)}): $e',
+      );
       return [];
     }
   }

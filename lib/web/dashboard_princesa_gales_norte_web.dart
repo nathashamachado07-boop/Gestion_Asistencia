@@ -142,7 +142,7 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.white24),
+        border: Border.all(color: Colors.white38),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
@@ -291,7 +291,7 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
             decoration: BoxDecoration(
               color: _card,
               borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: color.withValues(alpha: 0.14)),
+              border: Border.all(color: color.withValues(alpha: 0.26)),
               boxShadow: [
                 BoxShadow(
                   color: color.withValues(alpha: 0.08),
@@ -313,7 +313,7 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: color.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: color.withValues(alpha: 0.18)),
+                    border: Border.all(color: color.withValues(alpha: 0.30)),
                   ),
                   child: Icon(icon, color: color),
                 ),
@@ -410,7 +410,7 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: _card,
                   borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: color.withValues(alpha: 0.14)),
+                  border: Border.all(color: color.withValues(alpha: 0.26)),
                   boxShadow: [
                     BoxShadow(
                       color: color.withValues(alpha: 0.08),
@@ -433,7 +433,7 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
                         color: color.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: color.withValues(alpha: 0.18),
+                          color: color.withValues(alpha: 0.30),
                         ),
                       ),
                       child: Icon(icon, color: color),
@@ -517,7 +517,7 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
           decoration: BoxDecoration(
             color: _card,
             borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: const Color(0xFFF0D8E2)),
+            border: Border.all(color: const Color(0xFFD7A7BB)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -613,7 +613,7 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: _accent.withValues(alpha: 0.35)),
+                border: Border.all(color: _accent.withValues(alpha: 0.48)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -664,7 +664,7 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
                           color: _soft,
                           borderRadius: BorderRadius.circular(18),
                           border: Border.all(
-                            color: _accent.withValues(alpha: 0.22),
+                            color: _accent.withValues(alpha: 0.34),
                           ),
                         ),
                         child: Row(
@@ -743,7 +743,7 @@ class DashboardPrincesaGalesNorteWeb extends StatelessWidget {
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.07),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.18)),
+        border: Border.all(color: color.withValues(alpha: 0.30)),
         boxShadow: [
           BoxShadow(
             color: color.withValues(alpha: 0.06),

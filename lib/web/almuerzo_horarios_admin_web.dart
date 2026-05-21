@@ -189,7 +189,7 @@ class AlmuerzoHorariosAdminWeb extends StatelessWidget {
                               color: Colors.white.withValues(alpha: 0.94),
                               borderRadius: BorderRadius.circular(24),
                               border: Border.all(
-                                color: _primary.withValues(alpha: 0.12),
+                                color: _primary.withValues(alpha: 0.24),
                               ),
                             ),
                             child: Text(
@@ -241,7 +241,7 @@ class AlmuerzoHorariosAdminWeb extends StatelessWidget {
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: Colors.white24),
+          border: Border.all(color: Colors.white38),
         ),
         child: Text(
           'Administrativos disponibles: $totalAdministrativos',
@@ -266,7 +266,7 @@ class AlmuerzoHorariosAdminWeb extends StatelessWidget {
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(26),
-        border: Border.all(color: _primary.withValues(alpha: 0.22), width: 1.4),
+        border: Border.all(color: _primary.withValues(alpha: 0.34), width: 1.4),
         boxShadow: [
           BoxShadow(
             color: _primary.withValues(alpha: 0.12),
@@ -291,7 +291,7 @@ class AlmuerzoHorariosAdminWeb extends StatelessWidget {
                 top: Radius.circular(24),
               ),
               border: Border(
-                bottom: BorderSide(color: _primary.withValues(alpha: 0.10)),
+                bottom: BorderSide(color: _primary.withValues(alpha: 0.22)),
               ),
             ),
             child: Row(
@@ -302,7 +302,7 @@ class AlmuerzoHorariosAdminWeb extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: _primary.withValues(alpha: 0.12),
                     shape: BoxShape.circle,
-                    border: Border.all(color: _primary.withValues(alpha: 0.18)),
+                    border: Border.all(color: _primary.withValues(alpha: 0.30)),
                   ),
                   child: Center(
                     child: Text(
@@ -363,7 +363,7 @@ class AlmuerzoHorariosAdminWeb extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: _primary.withValues(alpha: 0.14)),
+                    border: Border.all(color: _primary.withValues(alpha: 0.26)),
                     boxShadow: [
                       BoxShadow(
                         color: _primary.withValues(alpha: 0.04),
@@ -420,7 +420,7 @@ class AlmuerzoHorariosAdminWeb extends StatelessWidget {
                             foregroundColor: _primary,
                             backgroundColor: _primary.withValues(alpha: 0.06),
                             side: BorderSide(
-                              color: _primary.withValues(alpha: 0.30),
+                              color: _primary.withValues(alpha: 0.42),
                               width: 1.4,
                             ),
                             padding: const EdgeInsets.symmetric(
@@ -454,7 +454,7 @@ class AlmuerzoHorariosAdminWeb extends StatelessWidget {
       decoration: BoxDecoration(
         color: _surface,
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: _primary.withValues(alpha: 0.12)),
+        border: Border.all(color: _primary.withValues(alpha: 0.24)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

@@ -32,6 +32,7 @@ class _LoginScreenState extends State<LoginScreen>
 
   AppBranding get _branding =>
       AppBranding.fromSedeId(widget.appConfig.defaultSedeId);
+  bool _assetsPrecached = false;
 
   @override
   void initState() {
@@ -42,6 +43,16 @@ class _LoginScreenState extends State<LoginScreen>
     );
     _fadeAnim = CurvedAnimation(parent: _animController, curve: Curves.easeIn);
     _animController.forward();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_assetsPrecached) {
+      return;
+    }
+    _assetsPrecached = true;
+    precacheImage(AssetImage(_branding.logoHeader), context);
   }
 
   @override

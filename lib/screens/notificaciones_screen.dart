@@ -315,9 +315,9 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
                                       borderRadius: BorderRadius.circular(28),
                                       border: Border.all(
                                         color: _isWebLayout
-                                            ? const Color(0xFF4D7374)
+                                            ? const Color(0xFF365B5C)
                                             : _branding.primary.withValues(
-                                                alpha: 0.18,
+                                                alpha: 0.30,
                                               ),
                                         width: _isWebLayout ? 1.4 : 1,
                                       ),
@@ -486,7 +486,7 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
                               borderRadius: BorderRadius.circular(28),
                               border: Border.all(
                                 color: _branding.primary.withValues(
-                                  alpha: 0.14,
+                                  alpha: 0.26,
                                 ),
                               ),
                             ),
@@ -579,8 +579,8 @@ class _NotificacionesScreenState extends State<NotificacionesScreen> {
         ],
         border: Border.all(
           color: _isWebLayout
-              ? const Color(0xFF4D7374)
-              : _branding.primary.withValues(alpha: 0.24),
+              ? const Color(0xFF365B5C)
+              : _branding.primary.withValues(alpha: 0.36),
           width: _isWebLayout ? 1.4 : 1,
         ),
       ),

@@ -40,6 +40,9 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
   bool _sincronizandoNumeracionSolicitudes = false;
   late Stream<QuerySnapshot> _solicitudesStream;
   late Stream<QuerySnapshot> _usuariosStream;
+  int? _ultimaHuellaUsuarios;
+  Set<String>? _allowedCollaboratorsCache;
+  int? _ultimaHuellaSolicitudesSincronizadas;
 
   static const Color _primary = Color(0xFF2F6E6F);
   static const Color _primaryDark = Color(0xFF173B3C);
@@ -116,25 +119,49 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
   }
 
   Query<Map<String, dynamic>> _buildSolicitudesQuery() {
-    return FirebaseFirestore.instance.collection('solicitudes');
+    var query = FirebaseFirestore.instance
+        .collection('solicitudes')
+        .where('sedeId', isEqualTo: _resolvedSedeId);
+    if (_filtroActual == 'Pendientes') {
+      query = query.where('estado', isEqualTo: 'pendiente');
+    }
+    return query;
   }
 
   Stream<QuerySnapshot> _buildSolicitudesStream() {
-    final solicitudesQuery = _buildSolicitudesQuery();
-    return _resolvedSedeId == SedeAccess.matrizId
-        ? solicitudesQuery.snapshots()
-        : solicitudesQuery
-              .where('sedeId', isEqualTo: _resolvedSedeId)
-              .snapshots();
+    return _buildSolicitudesQuery().snapshots();
   }
 
   Stream<QuerySnapshot> _buildUsuariosStream() {
-    return FirebaseFirestore.instance.collection('usuarios').snapshots();
+    return FirebaseFirestore.instance
+        .collection('usuarios')
+        .where('sedeId', isEqualTo: _resolvedSedeId)
+        .where(
+          'rol',
+          whereIn: const [
+            'Docente',
+            'Personal administrativo',
+            'Administrativo',
+            'RRHH',
+            'Admin',
+          ],
+        )
+        .snapshots();
   }
 
   void _rebuildStreams() {
     _solicitudesStream = _buildSolicitudesStream();
     _usuariosStream = _buildUsuariosStream();
+  }
+
+  void _actualizarFiltroSolicitudes(String value) {
+    if (_filtroActual == value) {
+      return;
+    }
+    setState(() {
+      _filtroActual = value;
+      _rebuildStreams();
+    });
   }
 
   Color get _brandPrimaryDark =>
@@ -147,11 +174,11 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
   Color get _cardSurface => _useSedeBranding ? Colors.white : Colors.white;
   Color get _softPanel => _useSedeBranding ? _branding.surface : _surface;
   Color get _lineColor => _useSedeBranding
-      ? _branding.primary.withValues(alpha: 0.24)
-      : _brandPrimary.withValues(alpha: 0.18);
+      ? _branding.primary.withValues(alpha: 0.34)
+      : _brandPrimary.withValues(alpha: 0.28);
   Color get _panelBorderColor => _useSedeBranding
-      ? _branding.primary.withValues(alpha: 0.22)
-      : _brandPrimary.withValues(alpha: 0.18);
+      ? _branding.primary.withValues(alpha: 0.32)
+      : _brandPrimary.withValues(alpha: 0.28);
   List<Color> get _heroGradient => _useSedeBranding
       ? [
           _branding.primaryDark,
@@ -169,7 +196,12 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
   // --- Reglas de visibilidad y aprobacion ---------------------------------
 
   Set<String> _allowedCollaborators(List<QueryDocumentSnapshot> docs) {
-    return docs
+    final huella = Object.hashAll(docs.map((doc) => doc.id));
+    if (_ultimaHuellaUsuarios == huella && _allowedCollaboratorsCache != null) {
+      return _allowedCollaboratorsCache!;
+    }
+
+    final resultado = docs
         .map((doc) => doc.data() as Map<String, dynamic>)
         .where((data) {
           final isValidRole =
@@ -182,6 +214,10 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
         .map((data) => (data['nombre'] ?? '').toString().trim())
         .where((name) => name.isNotEmpty)
         .toSet();
+
+    _ultimaHuellaUsuarios = huella;
+    _allowedCollaboratorsCache = resultado;
+    return resultado;
   }
 
   List<QueryDocumentSnapshot> _filterSolicitudes(
@@ -350,6 +386,11 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
       return;
     }
 
+    final huella = Object.hashAll(docs.map((doc) => doc.id));
+    if (_ultimaHuellaSolicitudesSincronizadas == huella) {
+      return;
+    }
+
     _sincronizandoNumeracionSolicitudes = true;
     Future<void>(() async {
       try {
@@ -357,6 +398,7 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
           docs,
           sedeId: _resolvedSedeId,
         );
+        _ultimaHuellaSolicitudesSincronizadas = huella;
       } finally {
         _sincronizandoNumeracionSolicitudes = false;
       }
@@ -369,6 +411,12 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
       correo: _correoActual,
       sedeId: _resolvedSedeId,
     );
+  }
+
+  bool _debeFirmarPdfAlExportar(Map<String, dynamic>? certificadoDigital) {
+    // La firma automatica del PDF queda preparada para activarse despues,
+    // pero por ahora el flujo oficial sigue exportando sin firma criptografica.
+    return false;
   }
 
   bool _certificadoDigitalConfigurado(Map<String, dynamic>? certificado) {
@@ -1146,7 +1194,7 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
           decoration: BoxDecoration(
             gradient: LinearGradient(colors: _heroGradient),
             borderRadius: BorderRadius.circular(30),
-            border: Border.all(color: _brandPrimary.withValues(alpha: 0.22)),
+            border: Border.all(color: _brandPrimary.withValues(alpha: 0.34)),
             boxShadow: [
               BoxShadow(
                 color: _brandPrimary.withValues(alpha: _isNorth ? 0.28 : 0.18),
@@ -1174,7 +1222,7 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
                           alpha: _isNorth ? 0.18 : 0.12,
                         ),
                         borderRadius: BorderRadius.circular(999),
-                        border: Border.all(color: Colors.white24),
+                        border: Border.all(color: Colors.white38),
                       ),
                       child: Text(
                         _isNorth
@@ -1205,8 +1253,8 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
                             ),
                             border: Border.all(
                               color: _isNorth
-                                  ? Colors.white.withValues(alpha: 0.34)
-                                  : Colors.white24,
+                                  ? Colors.white.withValues(alpha: 0.46)
+                                  : Colors.white38,
                             ),
                           ),
                           child: Padding(
@@ -1301,8 +1349,8 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
           borderRadius: BorderRadius.circular(_isNorth ? 28 : 24),
           border: Border.all(
             color: _isNorth
-                ? Colors.white.withValues(alpha: 0.22)
-                : Colors.white24,
+                ? Colors.white.withValues(alpha: 0.34)
+                : Colors.white38,
           ),
         ),
         child: Column(
@@ -1398,8 +1446,8 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
         borderRadius: BorderRadius.circular(_isNorth ? 30 : 24),
         border: Border.all(
           color: _isNorth
-              ? color.withValues(alpha: 0.28)
-              : color.withValues(alpha: 0.22),
+              ? color.withValues(alpha: 0.40)
+              : color.withValues(alpha: 0.34),
         ),
         boxShadow: [
           BoxShadow(
@@ -1529,14 +1577,14 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
                           accentColor: _warning,
                           icon: Icons.pending_actions_rounded,
                           onTap: () =>
-                              setState(() => _filtroActual = 'Pendientes'),
+                              _actualizarFiltroSolicitudes('Pendientes'),
                         ),
                         _buildFilterChip(
                           label: 'Todas ($total)',
                           selected: _filtroActual == 'Todas',
                           accentColor: _brandPrimary,
                           icon: Icons.layers_outlined,
-                          onTap: () => setState(() => _filtroActual = 'Todas'),
+                          onTap: () => _actualizarFiltroSolicitudes('Todas'),
                         ),
                         OutlinedButton.icon(
                           onPressed: () {
@@ -1806,7 +1854,7 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
       decoration: BoxDecoration(
         color: _cardSurface,
         borderRadius: BorderRadius.circular(_isNorth ? 24 : 20),
-        border: Border.all(color: badge.color.withValues(alpha: 0.18)),
+        border: Border.all(color: badge.color.withValues(alpha: 0.30)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.05),
@@ -2103,7 +2151,7 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
       decoration: BoxDecoration(
         color: _brandPrimary.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: _brandPrimary.withValues(alpha: 0.14)),
+        border: Border.all(color: _brandPrimary.withValues(alpha: 0.26)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -2204,7 +2252,7 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14),
           side: outlined
-              ? BorderSide(color: color.withValues(alpha: 0.18))
+              ? BorderSide(color: color.withValues(alpha: 0.30))
               : BorderSide.none,
         ),
       ),
@@ -2589,8 +2637,7 @@ class _GestionPersonalWebState extends State<GestionPersonalWeb> {
     Uint8List pdfBytes = await pdf.save();
     var firmadoDigitalmente = false;
     final certificadoDigital = await _obtenerCertificadoDigitalActual();
-    final permitirFirmaAlAbrirPdf = false;
-    if (permitirFirmaAlAbrirPdf &&
+    if (_debeFirmarPdfAlExportar(certificadoDigital) &&
         _certificadoDigitalConfigurado(certificadoDigital) &&
         mounted) {
       final certificatePassword = await _solicitarClaveCertificadoDialog(

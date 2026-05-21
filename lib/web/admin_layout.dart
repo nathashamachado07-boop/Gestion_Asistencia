@@ -32,6 +32,9 @@ class AdminLayout extends StatefulWidget {
 class _AdminLayoutState extends State<AdminLayout> {
   int _selectedIndex = 0;
   late Map<String, dynamic>? _userData;
+  late String _nombreUsuarioCache;
+  late String _usuarioSedeIdCache;
+  late List<String> _sedesPermitidasUsuarioCache;
   bool _sidebarCollapsed = false;
   String? _sedeVistaForzadaId;
   StreamSubscription<QuerySnapshot>? _solicitudesSubscription;
@@ -56,6 +59,7 @@ class _AdminLayoutState extends State<AdminLayout> {
     _userData = widget.userData == null
         ? null
         : Map<String, dynamic>.from(widget.userData!);
+    _sincronizarContextoSesion();
     _inicializarNotificacionesWeb();
     _escucharSolicitudesPendientes();
   }
@@ -66,16 +70,32 @@ class _AdminLayoutState extends State<AdminLayout> {
     super.dispose();
   }
 
-  String get _nombreUsuario {
-    return UserRoleAccess.displayNameForUser(_userData);
+  @override
+  void didUpdateWidget(covariant AdminLayout oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.userData != widget.userData) {
+      _userData = widget.userData == null
+          ? null
+          : Map<String, dynamic>.from(widget.userData!);
+      _sincronizarContextoSesion();
+    }
   }
 
-  String get _usuarioSedeId => _userData == null
-      ? SedeAccess.matrizId
-      : SedeAccess.resolveSedeId(_userData!);
+  void _sincronizarContextoSesion() {
+    _nombreUsuarioCache = UserRoleAccess.displayNameForUser(_userData);
+    _usuarioSedeIdCache = _userData == null
+        ? SedeAccess.matrizId
+        : SedeAccess.resolveSedeId(_userData!);
+    _sedesPermitidasUsuarioCache = List<String>.unmodifiable(
+      MatrizApprovalFlow.allowedSedeIdsForUser(_userData),
+    );
+  }
 
-  List<String> get _sedesPermitidasUsuario =>
-      MatrizApprovalFlow.allowedSedeIdsForUser(_userData);
+  String get _nombreUsuario => _nombreUsuarioCache;
+
+  String get _usuarioSedeId => _usuarioSedeIdCache;
+
+  List<String> get _sedesPermitidasUsuario => _sedesPermitidasUsuarioCache;
 
   bool get _puedeCambiarSede => _sedesPermitidasUsuario.length > 1;
 
@@ -407,8 +427,8 @@ class _AdminLayoutState extends State<AdminLayout> {
                               border: Border(
                                 bottom: BorderSide(
                                   color: _isCreSer
-                                      ? _creSerBlue.withValues(alpha: 0.15)
-                                      : Colors.white10,
+                                      ? _creSerBlue.withValues(alpha: 0.28)
+                                      : Colors.white38,
                                 ),
                               ),
                             ),
@@ -541,9 +561,9 @@ class _AdminLayoutState extends State<AdminLayout> {
                                       border: Border.all(
                                         color: _isCreSer
                                             ? _creSerBlue.withValues(
-                                                alpha: 0.25,
+                                                alpha: 0.38,
                                               )
-                                            : Colors.white12,
+                                            : Colors.white38,
                                       ),
                                     ),
                                     child: Row(
@@ -860,7 +880,7 @@ class _AdminLayoutState extends State<AdminLayout> {
                                           ),
                                           border: Border.all(
                                             color: miColorBase.withValues(
-                                              alpha: 0.2,
+                                              alpha: 0.32,
                                             ),
                                           ),
                                         ),
@@ -896,7 +916,7 @@ class _AdminLayoutState extends State<AdminLayout> {
                                         foregroundColor: miColorBase,
                                         side: BorderSide(
                                           color: miColorBase.withValues(
-                                            alpha: 0.2,
+                                            alpha: 0.32,
                                           ),
                                         ),
                                         padding: const EdgeInsets.symmetric(
@@ -970,7 +990,7 @@ class _AdminLayoutState extends State<AdminLayout> {
                                             ),
                                             border: Border.all(
                                               color: miColorBase.withValues(
-                                                alpha: 0.2,
+                                                alpha: 0.32,
                                               ),
                                             ),
                                           ),
@@ -1008,7 +1028,7 @@ class _AdminLayoutState extends State<AdminLayout> {
                                           foregroundColor: miColorBase,
                                           side: BorderSide(
                                             color: miColorBase.withValues(
-                                              alpha: 0.2,
+                                              alpha: 0.32,
                                             ),
                                           ),
                                           padding: const EdgeInsets.symmetric(
@@ -1118,7 +1138,7 @@ class _AdminLayoutState extends State<AdminLayout> {
           constraints: const BoxConstraints(maxWidth: 420),
           padding: const EdgeInsets.all(28),
           decoration: BootstrapAdminUi.surfaceCard(
-            borderColor: Colors.redAccent.withValues(alpha: 0.16),
+            borderColor: Colors.redAccent.withValues(alpha: 0.28),
             shadowColor: Colors.redAccent,
             radius: 24,
           ),
@@ -1282,7 +1302,7 @@ class _AdminLayoutState extends State<AdminLayout> {
             decoration: BoxDecoration(
               color: miColorBase.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: miColorBase.withValues(alpha: 0.24)),
+              border: Border.all(color: miColorBase.withValues(alpha: 0.36)),
             ),
             child: Stack(
               clipBehavior: Clip.none,

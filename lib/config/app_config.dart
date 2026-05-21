@@ -9,7 +9,7 @@ class AppConfig {
   bool get isSedeCreSerApp => defaultSedeId == SedeAccess.sedeCreSerId;
 
   static const AppConfig matriz = AppConfig(
-    appName: 'Sistema Asistencia ISTS',
+    appName: 'Sistema de asistencia INTESUD',
     defaultSedeId: SedeAccess.matrizId,
   );
 

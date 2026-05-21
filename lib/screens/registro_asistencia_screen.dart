@@ -49,9 +49,6 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
   int _indiceActual = 0;
   int _pestanaInternaActiva = 0;
 
-  late String _horaActual;
-  late String _fechaActual;
-  Timer? _timer;
   StreamSubscription<QuerySnapshot>? _avisosSubscription;
   StreamSubscription<QuerySnapshot>? _almuerzoSubscription;
   StreamSubscription<QuerySnapshot>? _usuarioHorarioSubscription;
@@ -70,7 +67,6 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
   String _estadoAlmuerzo = "pendiente";
   String _horaAlmuerzoInicio = "--:--";
   String _horaAlmuerzoFin = "--:--";
-
   Position? _posicionActual;
   AppBranding get _branding => AppBranding.fromLegacy(
     isSedeNorte: widget.isSedeNorte,
@@ -259,6 +255,29 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
     }
   }
 
+  void _aplicarConfiguracionDesdeUsuario(Map<String, dynamic> usuario) {
+    final remotos = _sanitizarHorarios(
+      List<dynamic>.from(usuario['horarios_asignados'] as List? ?? const []),
+    );
+    final vinculaciones = _service.resolverVinculacionesAsistenciaUsuario(
+      usuario,
+    );
+    final horariosVinculados = _sanitizarHorarios(
+      _horariosDesdeVinculaciones(vinculaciones),
+    );
+    final requiereGeolocalizacion = _service
+        .requiereGeolocalizacionUsuarioEfectiva(usuario);
+    final almuerzoHabilitado = _service.usuarioTieneAlmuerzoHabilitado(usuario);
+
+    _aplicarConfiguracionUsuario(
+      horarios: remotos.isNotEmpty ? remotos : horariosVinculados,
+      requiereGeolocalizacion: requiereGeolocalizacion,
+      vinculacionesAsistencia: vinculaciones,
+      rolUsuario: (usuario['rol'] ?? _rolUsuario).toString(),
+      almuerzoHabilitado: almuerzoHabilitado,
+    );
+  }
+
   Future<void> _sincronizarHorariosUsuario() async {
     try {
       final usuario = await _service.obtenerUsuarioPorCorreo(
@@ -267,28 +286,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
       if (!mounted || usuario == null) {
         return;
       }
-
-      final remotos = _sanitizarHorarios(
-        List<dynamic>.from(usuario['horarios_asignados'] as List? ?? const []),
-      );
-      final vinculaciones = _service.resolverVinculacionesAsistenciaUsuario(
-        usuario,
-      );
-      final horariosVinculados = _sanitizarHorarios(
-        _horariosDesdeVinculaciones(vinculaciones),
-      );
-      final requiereGeolocalizacion = _service
-          .requiereGeolocalizacionUsuarioEfectiva(usuario);
-      final almuerzoHabilitado =
-          _service.usuarioTieneAlmuerzoHabilitado(usuario);
-
-      _aplicarConfiguracionUsuario(
-        horarios: remotos.isNotEmpty ? remotos : horariosVinculados,
-        requiereGeolocalizacion: requiereGeolocalizacion,
-        vinculacionesAsistencia: vinculaciones,
-        rolUsuario: (usuario['rol'] ?? _rolUsuario).toString(),
-        almuerzoHabilitado: almuerzoHabilitado,
-      );
+      _aplicarConfiguracionDesdeUsuario(usuario);
     } catch (e) {
       debugPrint('No se pudo sincronizar el horario del usuario: $e');
     }
@@ -320,30 +318,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
           }
 
           usuarioDoc ??= snapshot.docs.first;
-          final remotos = _sanitizarHorarios(
-            List<dynamic>.from(
-              usuarioDoc.data()['horarios_asignados'] as List? ?? const [],
-            ),
-          );
-          final vinculaciones = _service.resolverVinculacionesAsistenciaUsuario(
-            usuarioDoc.data(),
-          );
-          final horariosVinculados = _sanitizarHorarios(
-            _horariosDesdeVinculaciones(vinculaciones),
-          );
-          final requiereGeolocalizacion = _service
-              .requiereGeolocalizacionUsuarioEfectiva(usuarioDoc.data());
-          final almuerzoHabilitado = _service.usuarioTieneAlmuerzoHabilitado(
-            usuarioDoc.data(),
-          );
-
-          _aplicarConfiguracionUsuario(
-            horarios: remotos.isNotEmpty ? remotos : horariosVinculados,
-            requiereGeolocalizacion: requiereGeolocalizacion,
-            vinculacionesAsistencia: vinculaciones,
-            rolUsuario: (usuarioDoc.data()['rol'] ?? _rolUsuario).toString(),
-            almuerzoHabilitado: almuerzoHabilitado,
-          );
+          _aplicarConfiguracionDesdeUsuario(usuarioDoc.data());
         });
   }
 
@@ -351,7 +326,10 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
     _almuerzoSubscription?.cancel();
 
     if (!_esTiempoCompleto()) {
-      if (mounted) {
+      if (mounted &&
+          (_estadoAlmuerzo != "pendiente" ||
+              _horaAlmuerzoInicio != "--:--" ||
+              _horaAlmuerzoFin != "--:--")) {
         setState(() {
           _estadoAlmuerzo = "pendiente";
           _horaAlmuerzoInicio = "--:--";
@@ -533,14 +511,9 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
     _almuerzoHabilitado = _horariosAsignados.any(
       (horario) => horario.toString().trim().toUpperCase().startsWith('TC'),
     );
-    _actualizarTiempo();
     _configurarEscuchaAlmuerzo();
     _escucharAvisosUsuario();
     _escucharHorarioUsuario();
-    _sincronizarHorariosUsuario();
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted) setState(() => _actualizarTiempo());
-    });
   }
 
   void _escucharEstadoAlmuerzo() {
@@ -551,36 +524,33 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
         .where('fecha', isEqualTo: hoy)
         .snapshots()
         .listen((snapshot) {
+          var nextEstado = "pendiente";
+          var nextHoraInicio = "--:--";
+          var nextHoraFin = "--:--";
           if (snapshot.docs.isNotEmpty) {
             var data = snapshot.docs.first.data();
-            setState(() {
-              _estadoAlmuerzo = data['estado'] ?? "pendiente";
-              _horaAlmuerzoInicio = data['hora_salida'] ?? "--:--";
-              _horaAlmuerzoFin = data['hora_regreso'] ?? "--:--";
-            });
-          } else if (mounted) {
-            setState(() {
-              _estadoAlmuerzo = "pendiente";
-              _horaAlmuerzoInicio = "--:--";
-              _horaAlmuerzoFin = "--:--";
-            });
+            nextEstado = (data['estado'] ?? "pendiente").toString();
+            nextHoraInicio = (data['hora_salida'] ?? "--:--").toString();
+            nextHoraFin = (data['hora_regreso'] ?? "--:--").toString();
           }
+          if (!mounted) {
+            return;
+          }
+          if (_estadoAlmuerzo == nextEstado &&
+              _horaAlmuerzoInicio == nextHoraInicio &&
+              _horaAlmuerzoFin == nextHoraFin) {
+            return;
+          }
+          setState(() {
+            _estadoAlmuerzo = nextEstado;
+            _horaAlmuerzoInicio = nextHoraInicio;
+            _horaAlmuerzoFin = nextHoraFin;
+          });
         });
-  }
-
-  void _actualizarTiempo() {
-    final ahora = DateTime.now();
-    _horaActual = DateFormat('HH:mm:ss').format(ahora);
-    try {
-      _fechaActual = DateFormat('EEEE, d MMMM', 'es').format(ahora);
-    } catch (e) {
-      _fechaActual = DateFormat('EEEE, d MMMM').format(ahora);
-    }
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
     _avisosSubscription?.cancel();
     _almuerzoSubscription?.cancel();
     _usuarioHorarioSubscription?.cancel();
@@ -705,7 +675,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
               borderRadius: BorderRadius.circular(18),
               border: Border.all(
                 color: (esAprobacion ? Colors.green : colorInstitucional)
-                    .withValues(alpha: 0.18),
+                    .withValues(alpha: 0.30),
               ),
               boxShadow: [
                 BoxShadow(
@@ -1057,7 +1027,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                     padding: const EdgeInsets.all(14),
                     alignment: Alignment.centerLeft,
                     side: BorderSide(
-                      color: colorInstitucional.withValues(alpha: 0.24),
+                      color: colorInstitucional.withValues(alpha: 0.36),
                     ),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16),
@@ -1163,6 +1133,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
 
       final res = await _service.registrarMarcacion(
         nombreUsuario: widget.nombreDocente,
+        correoUsuario: widget.correoUsuario,
         listaHorarios: _horariosAsignados,
         esEntrada: esEntrada,
         sedeId: _branding.sedeId,
@@ -1514,7 +1485,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.96),
         borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: colorInstitucional.withValues(alpha: 0.10)),
+        border: Border.all(color: colorInstitucional.withValues(alpha: 0.32)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.05),
@@ -1586,7 +1557,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
               color: colorInstitucional.withValues(alpha: 0.06),
               borderRadius: BorderRadius.circular(24),
               border: Border.all(
-                color: colorInstitucional.withValues(alpha: 0.10),
+                color: colorInstitucional.withValues(alpha: 0.22),
               ),
             ),
             child: Column(
@@ -1667,7 +1638,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(_isPhoneWebLayout ? 18 : 20),
-        border: Border.all(color: colorInstitucional.withValues(alpha: 0.08)),
+        border: Border.all(color: colorInstitucional.withValues(alpha: 0.30)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
@@ -1842,7 +1813,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
               color: Colors.white.withValues(alpha: 0.85),
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
-                color: colorInstitucional.withValues(alpha: 0.1),
+                color: colorInstitucional.withValues(alpha: 0.22),
               ),
               boxShadow: [
                 BoxShadow(
@@ -2004,51 +1975,11 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
   }
 
   Widget _buildRelojCard() {
-    final fontSize = _isPhoneWebLayout
-        ? 34.0
-        : (_isCompactWebLayout ? 44.0 : (_isWebPortal ? 54.0 : 40.0));
-
-    return Container(
-      width: double.infinity,
-      padding: EdgeInsets.symmetric(
-        vertical: _isWebPortal ? 28 : 20,
-        horizontal: 20,
-      ),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.85),
-        borderRadius: BorderRadius.circular(25),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 15,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: Border.all(color: colorInstitucional.withValues(alpha: 0.1)),
-      ),
-      child: Column(
-        children: [
-          Text(
-            _horaActual,
-            style: TextStyle(
-              fontSize: fontSize,
-              fontWeight: FontWeight.w200,
-              color: colorInstitucional,
-              letterSpacing: _isPhoneWebLayout ? 2 : (_isWebPortal ? 4 : 3),
-            ),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            _fechaActual.toUpperCase(),
-            style: TextStyle(
-              fontSize: _isPhoneWebLayout ? 11 : (_isWebPortal ? 13 : 11),
-              color: Colors.grey[600],
-              fontWeight: FontWeight.bold,
-              letterSpacing: _isPhoneWebLayout ? 1.1 : 1.5,
-            ),
-          ),
-        ],
-      ),
+    return _PortalClockCard(
+      isPhoneWebLayout: _isPhoneWebLayout,
+      isCompactWebLayout: _isCompactWebLayout,
+      isWebPortal: _isWebPortal,
+      colorInstitucional: colorInstitucional,
     );
   }
 
@@ -2121,7 +2052,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                       decoration: BoxDecoration(
                         color: Colors.white.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(18),
-                        border: Border.all(color: Colors.white10),
+                        border: Border.all(color: Colors.white38),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2292,7 +2223,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                                 ),
                               ],
                               border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.75),
+                                color: Colors.white.withValues(alpha: 0.92),
                                 width: 1,
                               ),
                             ),
@@ -2332,7 +2263,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
                 ),
               ],
               border: Border.all(
-                color: Colors.white.withValues(alpha: 0.75),
+                color: Colors.white.withValues(alpha: 0.92),
                 width: 1,
               ),
             ),
@@ -2581,7 +2512,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: Colors.white10),
+                border: Border.all(color: Colors.white38),
               ),
               child: collapsed
                   ? Column(
@@ -2764,7 +2695,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
           color: isActive ? Colors.white : Colors.white.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(18),
           border: Border.all(
-            color: Colors.white.withValues(alpha: isActive ? 0.0 : 0.06),
+            color: Colors.white.withValues(alpha: isActive ? 0.0 : 0.18),
           ),
         ),
         child: Row(
@@ -2841,7 +2772,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
             blurRadius: 20,
           ),
         ],
-        border: Border.all(color: colorInstitucional.withValues(alpha: 0.08)),
+        border: Border.all(color: colorInstitucional.withValues(alpha: 0.30)),
       ),
       child: Column(
         children: [
@@ -2957,7 +2888,7 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
         style: OutlinedButton.styleFrom(
           foregroundColor: colorInstitucional,
           side: BorderSide(
-            color: colorInstitucional.withValues(alpha: 0.4),
+            color: colorInstitucional.withValues(alpha: 0.52),
             width: 1.5,
           ),
           padding: const EdgeInsets.symmetric(vertical: 14),
@@ -2999,8 +2930,8 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
             ],
             border: Border.all(
               color: procesando
-                  ? color.withValues(alpha: 0.30)
-                  : color.withValues(alpha: 0.1),
+                  ? color.withValues(alpha: 0.42)
+                  : color.withValues(alpha: 0.22),
               width: procesando ? 1.6 : 1,
             ),
           ),
@@ -3064,6 +2995,113 @@ class _RegistroAsistenciaScreenState extends State<RegistroAsistenciaScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _PortalClockCard extends StatefulWidget {
+  const _PortalClockCard({
+    required this.isPhoneWebLayout,
+    required this.isCompactWebLayout,
+    required this.isWebPortal,
+    required this.colorInstitucional,
+  });
+
+  final bool isPhoneWebLayout;
+  final bool isCompactWebLayout;
+  final bool isWebPortal;
+  final Color colorInstitucional;
+
+  @override
+  State<_PortalClockCard> createState() => _PortalClockCardState();
+}
+
+class _PortalClockCardState extends State<_PortalClockCard> {
+  late Timer _timer;
+  late DateTime _now;
+
+  @override
+  void initState() {
+    super.initState();
+    _now = DateTime.now();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) {
+        setState(() => _now = DateTime.now());
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+
+  String get _horaActual => DateFormat('HH:mm:ss').format(_now);
+
+  String get _fechaActual {
+    try {
+      return DateFormat('EEEE, d MMMM', 'es').format(_now).toUpperCase();
+    } catch (_) {
+      return DateFormat('EEEE, d MMMM').format(_now).toUpperCase();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fontSize = widget.isPhoneWebLayout
+        ? 34.0
+        : (widget.isCompactWebLayout
+              ? 44.0
+              : (widget.isWebPortal ? 54.0 : 40.0));
+
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.symmetric(
+        vertical: widget.isWebPortal ? 28 : 20,
+        horizontal: 20,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(25),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 15,
+            offset: const Offset(0, 4),
+          ),
+        ],
+        border: Border.all(
+          color: widget.colorInstitucional.withValues(alpha: 0.32),
+        ),
+      ),
+      child: Column(
+        children: [
+          Text(
+            _horaActual,
+            style: TextStyle(
+              fontSize: fontSize,
+              fontWeight: FontWeight.w200,
+              color: widget.colorInstitucional,
+              letterSpacing: widget.isPhoneWebLayout
+                  ? 2
+                  : (widget.isWebPortal ? 4 : 3),
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            _fechaActual,
+            style: TextStyle(
+              fontSize: widget.isPhoneWebLayout
+                  ? 11
+                  : (widget.isWebPortal ? 13 : 11),
+              color: Colors.grey[600],
+              fontWeight: FontWeight.bold,
+              letterSpacing: widget.isPhoneWebLayout ? 1.1 : 1.5,
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -44,8 +44,23 @@ class EstadisticasAdminWeb extends StatelessWidget {
       : SedeAccess.displayNameForId(_resolvedSedeId);
   Color get _bannerColor => _branding.primary;
   Color get _bannerSoftColor => _branding.surface;
-  Color get _panelBorderColor => _branding.primary.withValues(alpha: 0.24);
+  Color get _panelBorderColor => _branding.primary.withValues(alpha: 0.34);
   Color get _panelShadowColor => _branding.primary.withValues(alpha: 0.10);
+
+  Stream<QuerySnapshot> _buildUsuariosStream() {
+    return FirebaseFirestore.instance
+        .collection('usuarios')
+        .where('sedeId', isEqualTo: _resolvedSedeId)
+        .where(
+          'rol',
+          whereIn: const [
+            'Docente',
+            'Personal administrativo',
+            'Administrativo',
+          ],
+        )
+        .snapshots();
+  }
 
   Set<String> _allowedNames(List<QueryDocumentSnapshot> docs) {
     return docs
@@ -79,30 +94,30 @@ class EstadisticasAdminWeb extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('asistencias_realizadas')
-          .snapshots(),
-      builder: (context, asistenciasSnapshot) {
-        if (asistenciasSnapshot.connectionState == ConnectionState.waiting) {
+      stream: _buildUsuariosStream(),
+      builder: (context, usuariosSnapshot) {
+        if (usuariosSnapshot.connectionState == ConnectionState.waiting) {
           return const Center(
             child: CircularProgressIndicator(color: Color(0xFF00C0EF)),
           );
         }
 
-        final asistencias = asistenciasSnapshot.data?.docs ?? const [];
+        final allowedNames = _allowedNames(
+          usuariosSnapshot.data?.docs ?? const [],
+        );
 
         return StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance.collection('usuarios').snapshots(),
-          builder: (context, usuariosSnapshot) {
-            if (usuariosSnapshot.connectionState == ConnectionState.waiting) {
+          stream: FirebaseFirestore.instance
+              .collection('asistencias_realizadas')
+              .snapshots(),
+          builder: (context, asistenciasSnapshot) {
+            if (asistenciasSnapshot.connectionState == ConnectionState.waiting) {
               return const Center(
                 child: CircularProgressIndicator(color: Color(0xFF00C0EF)),
               );
             }
 
-            final allowedNames = _allowedNames(
-              usuariosSnapshot.data?.docs ?? const [],
-            );
+            final asistencias = asistenciasSnapshot.data?.docs ?? const [];
             final filtrados = _filterAsistencias(
               asistencias,
               allowedNames: allowedNames,
@@ -336,7 +351,7 @@ class EstadisticasAdminWeb extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.red.shade50,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.redAccent.withValues(alpha: 0.18)),
+        border: Border.all(color: Colors.redAccent.withValues(alpha: 0.30)),
       ),
       child: Row(
         children: [
@@ -407,7 +422,7 @@ class EstadisticasAdminWeb extends StatelessWidget {
         color: active ? Colors.white.withValues(alpha: 0.22) : Colors.transparent,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: Colors.white.withValues(alpha: active ? 0.40 : 0.18),
+          color: Colors.white.withValues(alpha: active ? 0.52 : 0.30),
         ),
       ),
       child: Text(
